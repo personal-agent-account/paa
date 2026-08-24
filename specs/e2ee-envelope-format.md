@@ -81,12 +81,13 @@ with a `recipients[].device_key_id` it can route by. A conforming server impleme
 
 - MUST store and forward the envelope unmodified.
 - MUST route to recipients by `device_key_id`, without needing to decrypt.
-- MUST NOT require or accept plaintext where a sender's device has this format available
-  (mixing an unencrypted body alongside an envelope for the same message is rejected, not
-  silently allowed).
-- MAY fall back to a plaintext message path only when it can establish the recipient has no
-  registered device key at all (no envelope possible yet) — that fallback is a Stage 0/1
-  interoperability affordance, not part of this format.
+- MUST reject a message that carries both an envelope and plaintext content (text/files/urls)
+  at the same time — a message is either encrypted or plain, never both.
+- MAY accept a plain (non-enveloped) message on its own. Whether to send one is a **sender**
+  decision, not something this server-boundary spec governs: the current reference client
+  only sends an envelope when both sender and recipient have an active device key, and sends
+  plaintext otherwise (Stage 0/1 interoperability affordance — the server does not verify a
+  recipient's device-key status before accepting a plain message).
 
 ## What this spec deliberately does not cover
 
