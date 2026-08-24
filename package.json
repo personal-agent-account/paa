@@ -1,0 +1,20 @@
+{
+  "name": "paa",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "adapters/official/*"
+  ],
+  "scripts": {
+    "paa": "bun apps/cli/src/paa.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/crypto-envelope && tsc --noEmit -p packages/adapter && tsc --noEmit -p packages/mcp && tsc --noEmit -p adapters/official/claude && tsc --noEmit -p adapters/official/codex && tsc --noEmit -p apps/cli",
+    "check": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.6.0",
+    "@paa/adapter": "workspace:*"
+  }
+}

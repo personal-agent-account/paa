@@ -1,0 +1,102 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { saveCredential } from "@paa/adapter";
+
+// AC-12 / AC-14: CLI の公開面。status は metadata のみ、未対応 runtime は成功扱いしない。
+
+const CLI = fileURLToPath(new URL("../src/paa.ts", import.meta.url));
+
+const stub = Bun.serve({
+  port: 0,
+  fetch: (req) => {
+    const path = new URL(req.url).pathname;
+    if (path === "/v1/whoami") {
+      return Response.json({
+        agent_id: "agt_x",
+        handle: "aya",
+        display_name: "Aya",
+        unread: 2,
+        actor: { kind: "runtime", runtime_id: "rt_1" },
+      });
+    }
+    if (path === "/v1/inbox/messages") {
+      return Response.json([
+        { id: "msg_1", sender_display: "Shibu", bucket: "inbox", read: false },
+        { id: "msg_2", sender_display: "Shibu", bucket: "inbox", read: false },
+      ]);
+    }
+    return new Response("not found", { status: 404 });
+  },
+});
+afterAll(() => stub.stop(true));
+
+async function paa(args: string[], env: Record<string, string> = {}) {
+  const proc = Bun.spawn(["bun", CLI, ...args], {
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { exitCode: await proc.exited, stdout, stderr };
+}
+
+describe("paa CLI", () => {
+  test("未対応 runtime は対応一覧を出して失敗する(AC-14)", async () => {
+    const result = await paa(["install", "hermes"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("未対応の runtime: hermes");
+    expect(result.stderr).toContain("claude, codex");
+  }, 30_000);
+
+  test("status は attach 先と未読の要約だけを出す(AC-12 / 要件 §19)", async () => {
+    const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-cli-")) };
+    await saveCredential(
+      "claude",
+      {
+        runtime_id: "rt_1",
+        token: "par_x",
+        base_url: `http://localhost:${stub.port}`,
+        name: "MacBook / Claude Code",
+        paired_at: new Date().toISOString(),
+      },
+      env,
+    );
+    const result = await paa(["status"], env);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Attached as @aya");
+    expect(result.stdout).toContain("Unread: 2");
+    expect(result.stdout).toContain("- Shibu ×2");
+    expect(result.stdout).not.toContain("msg_1");
+  }, 30_000);
+
+  test("未接続なら status は次の一手を示して失敗する", async () => {
+    const result = await paa(["status"], { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-cli-")) });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("bun run paa install claude");
+  }, 30_000);
+
+  test("案内どおり repo 直下の 'bun run paa' で起動できる", async () => {
+    const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+    const proc = Bun.spawn(["bun", "run", "paa", "--help"], {
+      cwd: repoRoot,
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    expect(stdout).toContain("bun run paa <command>");
+  }, 30_000);
+
+  test("help を出せる", async () => {
+    const result = await paa(["--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bun run paa <command>");
+  }, 30_000);
+});

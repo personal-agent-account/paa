@@ -1,0 +1,13 @@
+{
+  "name": "@paa/adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@paa/core": "workspace:*",
+    "@paa/crypto-envelope": "workspace:*"
+  }
+}

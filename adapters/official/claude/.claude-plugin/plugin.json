@@ -1,0 +1,7 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "paa",
+  "version": "0.1.0",
+  "description": "Personal Agent Account — この runtime を @handle に attach し、Account の Mailbox / Contacts を使えるようにする",
+  "author": { "name": "shibu003" }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "paa",
+  "owner": { "name": "shibu003" },
+  "metadata": {
+    "description": "Personal Agent Account の official runtime adapter",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "paa",
+      "description": "Personal Agent Account を Claude Code に attach する (pairing は `paa pair claude`)",
+      "source": "./adapters/official/claude"
+    }
+  ]
+}

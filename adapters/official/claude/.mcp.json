@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "paa": {
+      "command": "bun",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server.ts"],
+      "env": {
+        "PAA_RUNTIME_KIND": "claude"
+      }
+    }
+  }
+}

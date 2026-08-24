@@ -1,0 +1,13 @@
+{
+  "name": "@paa/adapter-claude",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@paa/adapter": "workspace:*",
+    "@paa/mcp": "workspace:*"
+  }
+}

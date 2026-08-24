@@ -1,0 +1,150 @@
+import { apiCall } from "./api.ts";
+import { saveCredential, type RuntimeCredential } from "./credentials.ts";
+
+// device code flow(要件 §15.2 / 図 6)。runtime は user_code と URL を人に見せ、
+// 承認されるまで interval 秒間隔で claim を polling する。
+// claim は生 token を 1 回しか返さないため、credential を書き終えてから成功を返す。
+//
+// polling は「人が承認画面を操作している 10 分間」ずっと走る。その間の一過性の失敗
+// (server の 5xx、前段 proxy の HTML 502、瞬断)で pairing を畳まないこと。
+// 畳んだ結果を "expired" と呼ぶと、人には「期限切れ」と嘘を伝えることになる。
+
+export interface PairPrompt {
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface PairOptions {
+  baseUrl: string;
+  /** credential store の key（= adapter id） */
+  kind: string;
+  /** §32.4 の表示名。例: "MacBook / Claude Code" */
+  name: string;
+  onPrompt: (prompt: PairPrompt) => void;
+  /** test から時間を潰すための注入点 */
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  env?: Record<string, string | undefined>;
+}
+
+export type PairOutcome =
+  | { status: "paired"; credential: RuntimeCredential; polls: number }
+  | { status: "denied" }
+  | { status: "expired" }
+  /** 期限切れでも拒否でもない —— server に届かない / 応答が約束の形をしていない */
+  | { status: "failed"; detail: string };
+
+/** 一過性の失敗をこの回数連続したら諦める(人を無言で待たせ続けないため) */
+const MAX_CONSECUTIVE_TRANSIENT = 5;
+/** 一過性の失敗時に interval を伸ばす上限(ms) */
+const MAX_BACKOFF_MS = 30_000;
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+type Poll =
+  | { kind: "body"; body: any }
+  /** retry する価値のある失敗(瞬断・5xx・429) */
+  | { kind: "transient"; detail: string }
+  /** retry しても直らない失敗(4xx・約束外の応答) */
+  | { kind: "fatal"; detail: string };
+
+async function pollClaim(baseUrl: string, deviceCode: string): Promise<Poll> {
+  let res;
+  try {
+    res = await apiCall(baseUrl, "/v1/pair/claim", { body: { device_code: deviceCode } });
+  } catch (e) {
+    return { kind: "transient", detail: `${baseUrl} に接続できません: ${(e as Error).message}` };
+  }
+  if (res.status >= 500 || res.status === 429 || res.status === 408) {
+    return { kind: "transient", detail: `pair/claim が ${res.status} を返しました` };
+  }
+  if (res.status !== 200) {
+    return {
+      kind: "fatal",
+      detail: `pair/claim が ${res.status} を返しました: ${JSON.stringify(res.body)}`,
+    };
+  }
+  // 200 でも本文が JSON として読めなければ(proxy が差し込んだ HTML 等)約束外
+  if (res.body == null || typeof res.body !== "object") {
+    return { kind: "transient", detail: "pair/claim の応答が JSON ではありません" };
+  }
+  return { kind: "body", body: res.body };
+}
+
+export async function pairRuntime(options: PairOptions): Promise<PairOutcome> {
+  const sleep = options.sleep ?? defaultSleep;
+  const now = options.now ?? Date.now;
+  const start = await apiCall(options.baseUrl, "/v1/pair/start", {
+    body: { name: options.name, kind: options.kind },
+  });
+  if (start.status !== 201) {
+    throw new Error(`pair/start failed: ${start.status} ${JSON.stringify(start.body)}`);
+  }
+  const prompt: PairPrompt = {
+    user_code: start.body.user_code,
+    verification_uri: start.body.verification_uri,
+    verification_uri_complete: start.body.verification_uri_complete,
+    expires_in: start.body.expires_in,
+    interval: start.body.interval ?? 2,
+  };
+  options.onPrompt(prompt);
+
+  const deadline = now() + prompt.expires_in * 1000;
+  let polls = 0;
+  let transient = 0;
+  let lastTransient = "";
+
+  for (;;) {
+    // 1 回目は interval を待たずに撃つ(承認済みの状態から始まる再 install が即座に通る)
+    polls++;
+    const poll = await pollClaim(options.baseUrl, start.body.device_code);
+
+    if (poll.kind === "fatal") return { status: "failed", detail: poll.detail };
+
+    if (poll.kind === "transient") {
+      transient++;
+      lastTransient = poll.detail;
+      if (transient >= MAX_CONSECUTIVE_TRANSIENT) {
+        return {
+          status: "failed",
+          detail: `${poll.detail}(${transient} 回連続)`,
+        };
+      }
+    } else {
+      transient = 0;
+      const status = poll.body.status;
+      if (status === "denied") return { status: "denied" };
+      if (status === "expired") return { status: "expired" };
+      if (status === "approved") {
+        const credential: RuntimeCredential = {
+          runtime_id: poll.body.runtime_id,
+          token: poll.body.token,
+          base_url: options.baseUrl.replace(/\/$/, ""),
+          name: options.name,
+          paired_at: new Date(now()).toISOString(),
+        };
+        // 保存してから成功を返す(claim は 1 回きり。書く前に落ちると再 pair が必要になる)
+        await saveCredential(options.kind, credential, options.env ?? process.env);
+        return { status: "paired", credential, polls };
+      }
+      if (status !== "pending") {
+        return {
+          status: "failed",
+          detail: `pair/claim が未知の status を返しました: ${JSON.stringify(status)}`,
+        };
+      }
+    }
+
+    if (now() >= deadline) {
+      return transient > 0
+        ? { status: "failed", detail: `${lastTransient}(承認待ちの制限時間内に復旧しませんでした)` }
+        : { status: "expired" };
+    }
+    // 一過性の失敗が続く間だけ間隔を伸ばす。正常な polling は interval を守る(§ server 指定)
+    const backoff = Math.min(prompt.interval * 1000 * 2 ** transient, MAX_BACKOFF_MS);
+    await sleep(transient > 0 ? backoff : prompt.interval * 1000);
+  }
+}
