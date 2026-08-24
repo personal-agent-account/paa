@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in the SDK, CLI, an adapter, or the E2EE envelope doesn't behave as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repo is Public Alpha — breaking changes are expected, but unexpected behavior
+        vs. what `specs/*.md` or the code comments describe is still worth reporting.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - packages/core
+        - packages/crypto-envelope
+        - packages/adapter
+        - packages/mcp
+        - adapters/official/claude
+        - adapters/official/codex
+        - apps/cli
+        - specs/ (documentation mismatch)
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected vs. what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal repro — commands run, relevant `bun test` output, etc.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: "`git rev-parse HEAD` or the version you're on"
+    validations:
+      required: false

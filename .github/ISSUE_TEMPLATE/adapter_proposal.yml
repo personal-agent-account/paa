@@ -1,0 +1,41 @@
+name: Runtime adapter proposal
+description: Propose or start work on a RuntimeAdapter implementation for a runtime that isn't officially supported yet (Hermes, OpenClaw, or another).
+labels: ["adapter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PAA's value is runtime neutrality, and that only means something if more than two
+        runtimes implement the contract. See `specs/runtime-adapter-contract.md` and the
+        reference implementations in `adapters/official/{claude,codex}` before starting.
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      description: Which runtime/CLI/agent framework this adapter is for.
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities this runtime supports
+      description: |
+        Which parts of `AdapterCapabilities` can this runtime actually do —
+        pair / status / notify / wake / createSession / sendInstruction — and how
+        (e.g. does it have an MCP-server-equivalent config, a CLI you can shell out to)?
+    validations:
+      required: true
+  - type: textarea
+    id: gaps
+    attributes:
+      label: Contract gaps or open questions
+      description: Anything in `specs/runtime-adapter-contract.md` that doesn't map cleanly onto this runtime.
+    validations:
+      required: false
+  - type: checkboxes
+    id: status
+    attributes:
+      label: Status
+      options:
+        - label: I'm proposing this and looking for feedback before writing code
+        - label: I have a draft implementation ready for review
