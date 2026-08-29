@@ -4,3 +4,4 @@ export * from "./delegation.ts";
 export * from "./routing.ts";
 export * from "./content.ts";
 export * from "./extension.ts";
+export * from "./auto-register.ts";

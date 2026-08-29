@@ -80,4 +80,11 @@ server.tool(
   async ({ message_id }) => json(await tools.mark_read(message_id)),
 );
 
+server.tool(
+  "approval_get",
+  "自分が起こした approval(send/reply の承認待ち)の状態を取得する。pending/approved/rejected。content は含まない",
+  { approval_id: z.string() },
+  async ({ approval_id }) => json(await tools.approval_get(approval_id)),
+);
+
 await server.connect(new StdioServerTransport());

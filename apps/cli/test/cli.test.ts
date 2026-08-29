@@ -78,7 +78,7 @@ describe("paa CLI", () => {
   test("未接続なら status は次の一手を示して失敗する", async () => {
     const result = await paa(["status"], { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-cli-")) });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("bun run paa install claude");
+    expect(result.stderr).toContain("bun run paa login");
   }, 30_000);
 
   test("案内どおり repo 直下の 'bun run paa' で起動できる", async () => {

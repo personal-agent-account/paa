@@ -1,0 +1,315 @@
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { generateDeviceKeyPair, seal } from "@paa/crypto-envelope";
+
+// `paa agent <provider>`(PBI-0057 / EP-0009 B)。実 provider には到達させない ——
+// OpenAI 互換の fake server と stub Account API を立て、CLI が何を送ったかを観測する。
+
+const CLI = join(import.meta.dir, "../src/paa.ts");
+const TOKEN = "par_agent_test_token";
+
+// ---- stub Account API ----
+let threadResponse: any = null;
+let threadStatus = 200;
+let resolveQueue: { status: number; body: any }[] = [];
+let approvalStatus = "approved";
+let replyResponse: { status: number; body: any } = { status: 202, body: { status: "sent" } };
+let accountCalls: { path: string; body: any }[] = [];
+// 相手 handle の device 一覧。空 = 相手に device 無し = 平文 fallback(攻撃 test で差し替える)
+let handleDevices: any[] = [];
+
+const account = Bun.serve({
+  port: 0,
+  fetch: async (req) => {
+    const url = new URL(req.url);
+    const body = req.method === "POST" ? await req.json().catch(() => null) : null;
+    accountCalls.push({ path: url.pathname, body });
+    if (url.pathname.startsWith("/v1/threads/") && url.pathname.endsWith("/reply")) {
+      return Response.json(replyResponse.body, { status: replyResponse.status });
+    }
+    if (url.pathname.startsWith("/v1/threads/")) {
+      return Response.json(threadResponse, { status: threadStatus });
+    }
+    if (url.pathname.endsWith("/resolve")) {
+      const next = resolveQueue.shift() ?? { status: 200, body: { env: { OPENAI_TOKEN: API_KEY } } };
+      return Response.json(next.body, { status: next.status });
+    }
+    if (url.pathname.startsWith("/v1/approvals/")) {
+      return Response.json({ id: "apr_1", status: approvalStatus });
+    }
+    if (url.pathname.startsWith("/v1/handles/")) return Response.json(handleDevices);
+    if (url.pathname === "/v1/devices") return Response.json([]);
+    return new Response("not found", { status: 404 });
+  },
+});
+
+// ---- fake provider(OpenAI 互換) ----
+let providerCalls: any[] = [];
+let providerStatus = 200;
+let providerContent = "こちらが下書きです";
+
+const provider = Bun.serve({
+  port: 0,
+  fetch: async (req) => {
+    const body = await req.json().catch(() => null);
+    providerCalls.push({ body, auth: req.headers.get("authorization") });
+    if (providerStatus !== 200) return Response.json({ error: "boom" }, { status: providerStatus });
+    return Response.json({ choices: [{ message: { content: providerContent } }] });
+  },
+});
+
+const API_KEY = "sk-pbi0057-secret"; // gitleaks:allow(test fixture・実在しない key)
+const ACCOUNT_URL = `http://localhost:${account.port}`;
+const PROVIDER_URL = `http://localhost:${provider.port}`;
+
+afterAll(() => {
+  account.stop(true);
+  provider.stop(true);
+});
+
+async function makeHome(withCredential = true): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), "paa-agent-"));
+  await mkdir(join(home, ".paa"), { recursive: true });
+  if (withCredential) {
+    await writeFile(
+      join(home, ".paa", "credentials.json"),
+      JSON.stringify({
+        version: 1,
+        runtimes: {
+          "openai-api": {
+            runtime_id: "rt_openai",
+            token: TOKEN,
+            base_url: ACCOUNT_URL,
+            name: "OpenAI (API)",
+          },
+        },
+      }),
+    );
+  }
+  return home;
+}
+
+async function runCli(home: string, extra: string[] = [], provider: string = "openai") {
+  const proc = Bun.spawn(["bun", CLI, "agent", provider, "--thread", "th_1", ...extra], {
+    env: {
+      ...process.env,
+      HOME: home,
+      PAA_HOME: join(home, ".paa"),
+      PAA_AGENT_BASE_URL: PROVIDER_URL,
+      PAA_NO_BROWSER: "1",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const out = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
+  return { code: await proc.exited, out, err };
+}
+
+beforeEach(() => {
+  accountCalls = [];
+  providerCalls = [];
+  providerStatus = 200;
+  providerContent = "こちらが下書きです";
+  resolveQueue = [];
+  approvalStatus = "approved";
+  replyResponse = { status: 202, body: { status: "sent" } };
+  threadStatus = 200;
+  handleDevices = [];
+  threadResponse = {
+    id: "th_1",
+    peer_handle: "bob",
+    messages: [{ id: "msg_1", direction: "in", content: { text: "会議は何時ですか" } }],
+  };
+});
+
+describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
+  test("AC-1: 1 turn で provider を 1 回だけ呼び、reply を 1 回送って sent で終わる", async () => {
+    const res = await runCli(await makeHome());
+    expect(res.code).toBe(0);
+    expect(providerCalls.length).toBe(1);
+    const sentMessages = providerCalls[0]!.body.messages;
+    expect(sentMessages[sentMessages.length - 1]).toEqual({ role: "user", content: "会議は何時ですか" });
+    expect(providerCalls[0]!.auth).toBe(`Bearer ${API_KEY}`);
+    const replies = accountCalls.filter((c) => c.path.endsWith("/reply"));
+    expect(replies.length).toBe(1);
+    expect(replies[0]!.body.text).toBe("こちらが下書きです");
+    expect(res.out).toContain("送信しました");
+  });
+
+  test("AC-2: reply が ask_approval_required なら approval_id を出して exit 0", async () => {
+    replyResponse = { status: 202, body: { status: "ask_approval_required", approval_id: "apr_9" } };
+    const res = await runCli(await makeHome());
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("ask_approval_required");
+    expect(res.out).toContain("apr_9");
+  });
+
+  test("AC-3: envelope の message を device key で復号して provider に渡し、Account へ平文を書き戻さない", async () => {
+    const home = await makeHome();
+    // この端末の device key を作り、その key 宛に seal した message を stub に返させる
+    const kp = await generateDeviceKeyPair();
+    await writeFile(
+      join(home, ".paa", "device-keys.json"),
+      JSON.stringify({
+        version: 1,
+        devices: {
+          "openai-api": {
+            keyId: kp.keyId,
+            publicJwk: kp.publicJwk,
+            privateJwk: kp.privateJwk,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      }),
+    );
+    const envelope = await seal(
+      new TextEncoder().encode(JSON.stringify({ text: "暗号化された本文" })),
+      [{ keyId: kp.keyId, publicJwk: kp.publicJwk }],
+    );
+    threadResponse = {
+      id: "th_1",
+      peer_handle: "bob",
+      messages: [{ id: "msg_1", direction: "in", content: { envelope } }],
+    };
+    const res = await runCli(home);
+    expect(res.code).toBe(0);
+    const sent = providerCalls[0]!.body.messages;
+    expect(sent[sent.length - 1]!.content).toBe("暗号化された本文");
+    // 相手に device が無い stub なので reply は平文 fallback(PBI-0006 AC-7)。
+    // 「復号した相手の本文」を Account に書き戻していないことを確かめる
+    const reply = accountCalls.find((c) => c.path.endsWith("/reply"))!;
+    expect(JSON.stringify(reply.body)).not.toContain("暗号化された本文");
+  });
+
+  test("AC-4: resolve が 202 pending なら承認を待ってから provider を呼ぶ", async () => {
+    resolveQueue = [
+      { status: 202, body: { status: "pending_approval", approval_id: "apr_1" } },
+      { status: 200, body: { env: { OPENAI_TOKEN: API_KEY } } },
+    ];
+    const res = await runCli(await makeHome(), ["--wait", "10"]);
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("承認を待っています");
+    expect(providerCalls.length).toBe(1);
+  });
+
+  test("AC-5: --model で既定 model を上書きできる", async () => {
+    const res = await runCli(await makeHome(), ["--model", "gpt-x"]);
+    expect(res.code).toBe(0);
+    expect(providerCalls[0]!.body.model).toBe("gpt-x");
+  });
+});
+
+describe("paa agent の例外(PBI-0057 AC-X1〜X3)", () => {
+  test("AC-X1: credential が無ければ Account も provider も 1 度も叩かずに exit 1", async () => {
+    const res = await runCli(await makeHome(false));
+    expect(res.code).toBe(1);
+    expect(providerCalls.length).toBe(0);
+    expect(accountCalls.length).toBe(0);
+    expect(res.err).toContain("未接続");
+  });
+
+  test("AC-X2: resolve 403 / provider 500 / 空応答 は exit 1 で、出力に API key が出ず reply も送らない", async () => {
+    resolveQueue = [{ status: 403, body: { error: "connection_use_denied" } }];
+    const denied = await runCli(await makeHome());
+    expect(denied.code).toBe(1);
+    expect(denied.out + denied.err).not.toContain(API_KEY);
+    expect(accountCalls.filter((c) => c.path.endsWith("/reply")).length).toBe(0);
+
+    accountCalls = [];
+    providerStatus = 500;
+    const failed = await runCli(await makeHome());
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain("provider_error(500)");
+    expect(failed.out + failed.err).not.toContain(API_KEY);
+    expect(accountCalls.filter((c) => c.path.endsWith("/reply")).length).toBe(0);
+
+    accountCalls = [];
+    providerStatus = 200;
+    providerContent = "   ";
+    const empty = await runCli(await makeHome());
+    expect(empty.code).toBe(1);
+    expect(empty.err).toContain("empty_draft");
+    expect(accountCalls.filter((c) => c.path.endsWith("/reply")).length).toBe(0);
+  });
+
+  test("AC-X3: 同じ thread に 2 本同時に走らせても device-keys.json が壊れない", async () => {
+    const home = await makeHome();
+    const [a, b] = await Promise.all([runCli(home), runCli(home)]);
+    expect([0, 1]).toContain(a.code);
+    expect([0, 1]).toContain(b.code);
+    const raw = await readFile(join(home, ".paa", "device-keys.json"), "utf8").catch(() => "{}");
+    expect(() => JSON.parse(raw)).not.toThrow();
+  });
+});
+
+// レビュー(有界)の攻撃 test — 実装コードには触らない。X1/X2/X3 の行を破りに行く
+describe("paa agent への攻撃 (PBI-0057 review)", () => {
+  test("X1 攻撃: 別 provider の credential には乗り替えられない(agent gemini に openai-api の接続を使わせない)", async () => {
+    // credentials.json に openai-api だけ → gemini 呼び出しは未接続で即 exit 1。
+    // Account API も provider も 1 回も叩かせない
+    const home = await makeHome(); // openai-api のみ
+    const res = await runCli(home, [], "gemini");
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("未接続");
+    expect(accountCalls.length).toBe(0);
+    expect(providerCalls.length).toBe(0);
+  });
+
+  test("X1 攻撃 b: resolve 応答が別 provider の key(OPENAI_TOKEN)を返しても gemini 呼び出しに流用しない", async () => {
+    // gemini-api credential を同じ stub に足す。stub の resolve は常に OPENAI_TOKEN を返す
+    // (= server 側が取り違えた体)。CLI は GEMINI_TOKEN を探すので鍵の取り違えでは provider を呼ばない
+    const home = await makeHome();
+    const cred = JSON.parse(await readFile(join(home, ".paa", "credentials.json"), "utf8"));
+    cred.runtimes["gemini-api"] = {
+      runtime_id: "rt_gemini_atk",
+      token: TOKEN,
+      base_url: ACCOUNT_URL,
+      name: "Gemini (API)",
+    };
+    await writeFile(join(home, ".paa", "credentials.json"), JSON.stringify(cred));
+    const res = await runCli(home, [], "gemini");
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("connection_resolve_empty");
+    expect(providerCalls.length).toBe(0);
+    expect(accountCalls.filter((c) => c.path.endsWith("/reply")).length).toBe(0);
+  });
+
+  test("X2 攻撃: provider が API key を echo しても CLI 出力に出さない / thread 不在は provider を呼ばない", async () => {
+    // provider の応答本文に key が混入した体 → stdout/stderr に出ない(応答本文は reply へ行くだけで出力しない)
+    providerContent = `前に貰った key は ${API_KEY} です`;
+    const leaked = await runCli(await makeHome());
+    expect(leaked.code).toBe(0);
+    expect(leaked.out + leaked.err).not.toContain(API_KEY);
+
+    // thread が 404 → provider 呼び出しの前で止まる(key を手にしていても使わない)
+    accountCalls = [];
+    providerCalls = [];
+    threadStatus = 404;
+    const noThread = await runCli(await makeHome());
+    expect(noThread.code).toBe(1);
+    expect(providerCalls.length).toBe(0);
+    expect(accountCalls.filter((c) => c.path.endsWith("/reply")).length).toBe(0);
+  });
+
+  test("X3 攻撃: 2 プロセスが同じ kind の device key を同時作成しても 1 つの有効な鍵に収束する", async () => {
+    // 相手に active device を置くと seal 経路が ensureOwnDevice を通る = 両プロセスが
+    // device-keys.json を同時に作成・読み出す(既存 AC-X3 は平文で鍵ファイルを作らない経路だった)
+    const theirs = await generateDeviceKeyPair();
+    handleDevices = [{ id: "dev_theirs", public_key_jwk: theirs.publicJwk }];
+    const home = await makeHome();
+    const [a, b] = await Promise.all([runCli(home), runCli(home)]);
+    expect(a.code).toBe(0);
+    expect(b.code).toBe(0);
+    const raw = await readFile(join(home, ".paa", "device-keys.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(Object.keys(parsed.devices)).toEqual(["openai-api"]);
+    expect(parsed.devices["openai-api"].keyId).toBeString();
+    // reply は両方とも envelope(平文 fallback に落ちない)
+    const replies = accountCalls.filter((c) => c.path.endsWith("/reply"));
+    expect(replies.length).toBe(2);
+    for (const r of replies) expect(r.body.envelope).toBeDefined();
+  });
+});

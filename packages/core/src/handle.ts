@@ -64,3 +64,53 @@ export function validateHandle(input: string): HandleResult {
   if (RESERVED_HANDLES.has(handle)) return { ok: false, reason: "reserved" };
   return { ok: true, handle };
 }
+
+/**
+ * 宛先文字列の判定(W14a / PBI-0087)。`@` を含まない(または先頭にだけ含む)= PAA の
+ * @handle、途中に含む = 外部 address(email)。正本はこの 1 関数で、送信(POST /v1/send)と
+ * 今後の mail inbound(順 31)が同じ判定を使う。null は「宛先として解釈できない」。
+ *
+ * address は実用最小の RFC 5322 縮小形(`local@domain`・domain に dot 必須・空白不可・
+ * 320 文字上限 = RFC 5321 path 上限)。quoted local-part 等は対象外で弾く —
+ * PAA から外部へ出すのは plain address に限る。
+ *
+ * provider 住所(PBI-0093 / 図37): 第 2 引数 `providerDomains`(domain → provider の Map)を
+ * 渡すと、domain が一致する address を `{ kind: "provider" }` として切り分ける。Map は
+ * 呼び出し側(server)が PAA_MAIL_DOMAIN から組み立てる — core は env を持たない。
+ * 引数を渡さない呼び出しは従来どおり(handle / address の 2 値。既存 test 無変更)。
+ * local-part は自分の handle に固定される設計なので、handle 規則を満たさない
+ * local-part の provider 住所は解釈不能(null)として弾く。
+ */
+export type Recipient =
+  | { kind: "handle"; handle: string }
+  | { kind: "address"; address: string }
+  | { kind: "provider"; provider: string; handle: string };
+
+export function parseRecipient(
+  input: string,
+  providerDomains?: ReadonlyMap<string, string>,
+): Recipient | null {
+  const s = input.trim().toLowerCase();
+  if (s === "") return null;
+  // 先頭の @ は handle 記法(`@aya`)。除去後に @ が残るなら address
+  const withoutAt = s.replace(/^@+/, "");
+  if (withoutAt.includes("@")) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(withoutAt) && withoutAt.length <= 320) {
+      const [local, domain] = withoutAt.split("@") as [string, string];
+      // FQDN の trailing dot(`openai.mail.example.com.`)も同じ provider とみなす —
+      // 落とさないと PAA 管理空間の住所が表記ゆれだけで**外部 address 扱い**になり、
+      // 未登録住所を外の mail に出す(図37 の不変条件が core の判定だけで破れる)。
+      // providerDomains に無い通常 address は strip 後も無いので挙動不変
+      const provider =
+        providerDomains?.get(domain) ?? providerDomains?.get(domain.replace(/\.+$/, ""));
+      if (provider !== undefined) {
+        const h = validateHandle(local);
+        return h.ok ? { kind: "provider", provider, handle: h.handle } : null;
+      }
+      return { kind: "address", address: withoutAt };
+    }
+    return null;
+  }
+  const h = validateHandle(withoutAt);
+  return h.ok ? { kind: "handle", handle: h.handle } : null;
+}

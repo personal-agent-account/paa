@@ -15,7 +15,28 @@ not part of this repository and is not open source.
 The one hypothesis this repo's code exists to validate: **two independent runtimes,
 same identity, same inbox.** Claude Code and Codex both attach to the same `@handle`
 via the adapters in this repo and read/write the same mailbox — end-to-end, not just on
-paper. See `adapters/official/claude` and `adapters/official/codex`.
+paper. See `adapters/official/claude` and `adapters/official/codex`. Gemini CLI and generic API-key providers ship in the same tree
+(`adapters/official/gemini`, `adapters/official/api`).
+
+## Quickstart
+
+Requires [Bun](https://bun.com) 1.2+.
+
+```bash
+git clone https://github.com/personal-agent-account/paa.git
+cd paa && bun install
+
+# connect this Mac to your account (installs a background broker)
+bun run paa login --url <your server URL>
+bun run paa pair claude      # attach Claude Code (same flow for codex / gemini)
+bun run paa status
+```
+
+### Getting an account
+
+The Hosted Account Network is **invite-only** during the Public Alpha (Stage 1A):
+open an issue titled `invite` and include a way to reach you — you'll receive a
+server URL and an invite code, then run `paa login --url <server-url>` as above.
 
 ## What's in this repository
 

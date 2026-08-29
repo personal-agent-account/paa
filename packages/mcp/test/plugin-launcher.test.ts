@@ -18,8 +18,9 @@ import { saveCredential } from "@paa/adapter";
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const LAUNCHER = "adapters/official/claude/mcp-server.ts";
 
-/** 要件 §16 Runtime Access Contract の 7 tools(これ以外を生やさない) */
+/** 要件 §16 Runtime Access Contract の 8 tools(これ以外を生やさない。PBI-0031 で approval_get 追加) */
 const CONTRACT_TOOLS = [
+  "approval_get",
   "contacts_get",
   "contacts_list",
   "inbox_list",
@@ -51,7 +52,7 @@ beforeAll(async () => {
   clone = await mkdtemp(join(tmpdir(), "paa-plugin-"));
   const rsync = Bun.spawn(
     ["rsync", "-a", "--exclude", "node_modules", "--exclude", ".git", "--exclude", ".gstack",
-     repoRoot, `${clone}/`],
+     "--exclude", "target", repoRoot, `${clone}/`],
     { stdout: "pipe", stderr: "pipe" },
   );
   expect(await rsync.exited).toBe(0);
@@ -113,7 +114,7 @@ describe("plugin launcher の MCP 往復", () => {
     // AC-1: handshake が成立する(stdout に JSON-RPC 以外が混ざっていたらここで落ちる)
     expect(session.client.getServerVersion()?.name).toBe("paa-account");
 
-    // AC-2: 要件 §16 の 7 tools が過不足なく並ぶ(memory.* / task.* 等を生やさない)
+    // AC-2: 要件 §16 の 8 tools が過不足なく並ぶ(memory.* / task.* 等を生やさない)
     const tools = (await session.client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual(CONTRACT_TOOLS);
 

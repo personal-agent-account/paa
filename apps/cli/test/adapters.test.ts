@@ -38,7 +38,11 @@ describe("runtime adapter contract", () => {
 
   test("id は一意で、未対応 runtime は解決できない", () => {
     expect(new Set(SUPPORTED_IDS).size).toBe(SUPPORTED_IDS.length);
-    expect(SUPPORTED_IDS).toEqual(["claude", "codex"]);
+    // 外部 API provider(PBI-0070 / EP-0009 C)は factory 1 つから 3 つ載る。実体は `paa agent`
+    // PBI-0061 / W9c: gemini が 3 つ目の official CLI adapter(generic MCP-config の第 1 実例)
+    expect(SUPPORTED_IDS).toEqual([
+      "claude", "codex", "gemini", "openai-api", "gemini-api", "anthropic-api",
+    ]);
     expect(findAdapter("CLAUDE")?.id).toBe("claude");
     expect(findAdapter("hermes")).toBeUndefined();
   });

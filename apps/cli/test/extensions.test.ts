@@ -199,8 +199,8 @@ describe("paa sync / paa extensions", () => {
 
   test("未接続なら extensions / sync は次の一手を示して失敗する", async () => {
     const home = await isolatedHome();
-    expect((await paa(["extensions"], home)).stderr).toContain("bun run paa install claude");
-    expect((await paa(["sync"], home)).stderr).toContain("bun run paa install claude");
+    expect((await paa(["extensions"], home)).stderr).toContain("bun run paa login");
+    expect((await paa(["sync"], home)).stderr).toContain("bun run paa login");
   }, 30_000);
 
   test("AC-14: 1 件でも failed が有れば sync の exit code は 1 になる", async () => {

@@ -4,8 +4,13 @@
 
 export interface FileRef {
   name: string;
-  /** object storage 等への参照。MVP はローカル参照/URL 文字列 */
+  /** object storage 等への参照。内部 blob は `paa-file:<id>`(PBI-0074)。それ以外は URL 文字列 */
   ref: string;
+  /**
+   * 内部 blob の内容鍵(base64。crypto-envelope の encryptFileBytes が出す keyB64)。
+   * FileRef ごと envelope 平文に seal される為、server には見えない(E2EE §9)
+   */
+  key?: string;
   size?: number;
   mime?: string;
 }

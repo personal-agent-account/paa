@@ -1,4 +1,5 @@
 import type { ExtensionKind } from "@paa/core";
+import { accessSync, constants as fsConstants } from "node:fs";
 
 // Runtime Adapter Contract(配布戦略 §8)。
 // 「Runtime ごとに Account pairing logic を再発明しない」(§7.2 Invariant)ため、
@@ -123,6 +124,65 @@ export class AdapterError extends Error {
   }
 }
 
+/**
+ * `run()` が bare な command を解決する時に PATH の後ろへ足す dir(PBI-0050)。
+ * broker の discovery `default_bin_dirs`(broker/src/discovery.rs) と同じ一覧 — launchd が
+ * `paa broker` を最小 PATH(`/usr/bin:/bin:/usr/sbin:/sbin`)で起こした時も、adopt →
+ * `claude mcp add` がユーザーの install 先(`~/.local/bin` 等)を解決できるようにする。
+ * broker が検出した場所で登録できないと自動登録(EP-0004)が heartbeat 毎に失敗し続けるので、
+ * この一覧は broker 側と意図的に同じ内容を保つ(片方だけ直ると検出と登録が噛み合わない)
+ */
+function extraPathDirs(env: Record<string, string>): string[] {
+  // 上書きの口(PBI-0050 レビュー 2026-08-28): 未設定なら本番どおりの既定一覧。設定した時は
+  // それだけで置き換える(空文字 = 補強なし)。test が「CLI 無し / fake のみ」の env を作る時に
+  // 実機の /usr/local/bin 等へ届かないようにするための口で、本番の launchd では未設定のまま
+  if (env.PAA_EXTRA_PATH_DIRS !== undefined) {
+    return env.PAA_EXTRA_PATH_DIRS.split(":").filter(Boolean);
+  }
+  const dirs = ["/usr/local/bin", "/opt/homebrew/bin"];
+  if (env.HOME) {
+    dirs.push(`${env.HOME}/.local/bin`, `${env.HOME}/.cargo/bin`, `${env.HOME}/.npm-global/bin`);
+  }
+  if (env.NPM_CONFIG_PREFIX) dirs.push(`${env.NPM_CONFIG_PREFIX}/bin`);
+  return dirs;
+}
+
+/**
+ * bare な command を PATH で解決する。PATH に無ければ `extraPathDirs` も見て absolute path を
+ * 返す(`/` を含む command はそのまま)。どこにも無ければ名前の付いた Error —— ENOENT の生を
+ * register の error message(= broker の register_ack detail)に晒さない(PBI-0050 AC-X2)。
+ *
+ * `Bun.which` を使わず自前で走査する —— 実測(2026-08-28)では `Bun.which(cmd, { env })` が
+ * `env.PATH` を無視して **親 process の PATH**(`process.env.PATH`)から解決する。launchd 最小
+ * PATH の再現(test)や、将来 PATH を意図的に絞る呼び出しで契約が壊れるので、渡された env の
+ * PATH だけを見る解決をこの file に持つ
+ */
+function whichIn(dirs: string[], cmd: string): string | null {
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const p = `${dir}/${cmd}`;
+    try {
+      accessSync(p, fsConstants.X_OK);
+      return p;
+    } catch {
+      // 次の dir へ
+    }
+  }
+  return null;
+}
+
+function resolveCommand(env: Record<string, string>, cmd: string): string {
+  if (cmd.includes("/")) return cmd;
+  const pathDirs = (env.PATH ?? "").split(":");
+  const direct = whichIn(pathDirs, cmd);
+  if (direct) return direct;
+  const found = whichIn(extraPathDirs(env), cmd);
+  if (found) return found;
+  throw new Error(
+    `${cmd} が見つかりません(インストール済みなら PATH を、未 install なら runtime の install を確認してください)`,
+  );
+}
+
 /** adapter 実装が runtime CLI を叩くための共通 helper */
 export async function run(
   ctx: AdapterContext,
@@ -130,7 +190,8 @@ export async function run(
 ): Promise<{ ok: boolean; stdout: string; stderr: string; exitCode: number }> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(ctx.env)) if (v !== undefined) env[k] = v;
-  const proc = Bun.spawn(cmd, { env, stdout: "pipe", stderr: "pipe" });
+  const program = resolveCommand(env, cmd[0]!);
+  const proc = Bun.spawn([program, ...cmd.slice(1)], { env, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

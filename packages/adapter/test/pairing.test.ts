@@ -73,6 +73,48 @@ async function pair(steps: ClaimStep[], options: { expiresIn?: number } = {}) {
 }
 
 describe("pairing engine", () => {
+  test("PBI-0046 AC-X2: pair/start 自体が不達(fetch reject)でも throw せず、撃ち直しの後 failed を返す", async () => {
+    const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-pair-")) };
+    const sleeps: number[] = [];
+    const outcome = await pairRuntime({
+      baseUrl: "http://127.0.0.1:9", // 閉じている port
+      kind: "claude",
+      name: "test",
+      onPrompt: () => {
+        throw new Error("prompt は出ないはず");
+      },
+      sleep: async (ms) => void sleeps.push(ms),
+      env,
+    });
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") return;
+    expect(outcome.detail).toContain("http://127.0.0.1:9 に接続できません");
+    expect(outcome.detail).toContain("5 回連続");
+    // 生の fetch message(stack trace と見分けが付かない)は出さない
+    expect(outcome.detail).not.toContain("Unable to connect");
+    // 0.5 → 1 → 2 → 4 秒の backoff で 4 回待って 5 回撃つ
+    expect(sleeps).toEqual([500, 1000, 2000, 4000]);
+    expect(await getCredential("claude", env)).toBeUndefined();
+  });
+
+  test("PBI-0046 AC-X2: pair/start の 4xx は撃ち直さず即 failed(throw しない)", async () => {
+    const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-pair-")) };
+    const bad = Bun.serve({ port: 0, fetch: () => Response.json({ error: "invalid_kind" }, { status: 400 }) });
+    try {
+      const outcome = await pairRuntime({
+        baseUrl: `http://localhost:${bad.port}`,
+        kind: "claude",
+        name: "test",
+        onPrompt: () => {},
+        sleep: async () => {},
+        env,
+      });
+      expect(outcome).toEqual({ status: "failed", detail: 'pair/start が 400 を返しました: {"error":"invalid_kind"}' });
+    } finally {
+      bad.stop(true);
+    }
+  });
+
   test("承認されるまで interval 秒で polling し、credential を保存してから成功を返す", async () => {
     const { outcome, env, prompts, polls } = await pair([
       { status: "pending" },
@@ -155,4 +197,54 @@ describe("pairing engine", () => {
     const { outcome } = await pair([{ status: "teapot" }]);
     expect(outcome.status).toBe("failed");
   });
+});
+
+// ---- PBI-0046 再レビュー(有界)の攻撃 test(2026-08-28)。レビューセッションが追加 ----
+describe("PBI-0046 再レビュー: AC-X2 攻撃", () => {
+  test(
+    "pair/start が 2 回不達(503)した後に復旧したら pairing は成功する(撃ち直しが成功を拾う)",
+    async () => {
+      // 修正の成功経路の裏側: retry が「諦める条件」だけでなく「復旧したら通す」ことも確認する。
+      // ここが破れると retry は実質失敗固定で、server の一瞬の揺らぎでも login が必ず死ぬ
+      let startCalls = 0;
+      const flaky = Bun.serve({
+        port: 0,
+        fetch: (req) => {
+          const path = new URL(req.url).pathname;
+          if (path === "/v1/pair/start") {
+            startCalls++;
+            if (startCalls <= 2) return new Response("down", { status: 503 });
+            return Response.json(START, { status: 201 });
+          }
+          if (path === "/v1/pair/claim") {
+            return Response.json({ status: "approved", token: "par_flaky_recovery", runtime_id: "rt_flaky" });
+          }
+          return new Response("not found", { status: 404 });
+        },
+      });
+      try {
+        const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-pair-")) };
+        const sleeps: number[] = [];
+        const outcome = await pairRuntime({
+          baseUrl: `http://localhost:${flaky.port}`,
+          kind: "claude",
+          name: "test",
+          onPrompt: () => {},
+          sleep: async (ms) => void sleeps.push(ms),
+          env,
+        });
+        expect(outcome.status).toBe("paired");
+        expect(startCalls).toBe(3);
+        // 2 回の失敗の間に backoff(0.5 → 1 秒)を 2 回挟んでいる
+        expect(sleeps).toEqual([500, 1000]);
+        expect(await getCredential("claude", env)).toMatchObject({
+          token: "par_flaky_recovery",
+          runtime_id: "rt_flaky",
+        });
+      } finally {
+        flaky.stop(true);
+      }
+    },
+    30_000,
+  );
 });

@@ -10,8 +10,10 @@ import type { AdapterContext, RuntimeAdapter } from "./contract.ts";
 // Reconcile engine(PBI-0005)。Common Installation Engine(install.ts)と同じ場所に置く:
 // desired を API から取得 → listExtensions で actual → planReconciliation → applyExtension
 // を 1 件ずつ → noop 以外の結果を POST /v1/extensions/:id/status へ返す。
-// credential_ref はここでローカル解決する(env:NAME → process.env.NAME)。secret は Account を
-// 一度も通らない。1 件の失敗で全体を止めない(残りは適用し、失敗分だけ failed を報告する)。
+// credential_ref の解決は scheme で分岐する(PBI-0009): env:NAME はここでローカル解決
+// (process.env.NAME。secret は Account を一度も通らない)、connection:<provider> は
+// POST /v1/connections/:provider/resolve で Account 側に解決させる(§40)。
+// 1 件の失敗で全体を止めない(残りは適用し、失敗分だけ failed を報告する)。
 
 type Env = Record<string, string | undefined>;
 
@@ -63,12 +65,18 @@ interface DesiredWire {
   materializations: DesiredWireMaterialization[];
 }
 
+/**
+ * status 報告。**HTTP 応答を検査する**(PBI-0023 F3) —— apiCall は非 2xx でも throw せず
+ * `{status, body}` を返すので、戻り値を捨てると 403/404/500 が「適用済み」として集計され、
+ * CLI が成功を表示して exit 0 で終わる(DB は無変更)。AC-14 の exit 1 も AC-16 の
+ * 「2 回目は全件 noop」も、この検査が無いと嘘になる。
+ */
 async function reportStatus(
   options: ReconcileOptions,
   extensionId: string,
   body: { status: string; appliedRevision?: number | null; detail?: string },
 ): Promise<void> {
-  await apiCall(options.baseUrl, `/v1/extensions/${extensionId}/status`, {
+  const res = await apiCall(options.baseUrl, `/v1/extensions/${extensionId}/status`, {
     token: options.token,
     method: "POST",
     body: {
@@ -77,20 +85,48 @@ async function reportStatus(
       ...(body.detail !== undefined ? { detail: body.detail } : {}),
     },
   });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(
+      `status 報告に失敗しました(${res.status}): POST /v1/extensions/${extensionId}/status`,
+    );
+  }
 }
 
-/** env:NAME 形式の credential_ref をローカル解決する。scheme は env: のみ対応(未決の問い) */
-function resolveCredentialRef(
+/**
+ * credential_ref を解決する。scheme は 2 種:
+ * - env:NAME → ローカル解決(process.env 相当を engine 側から受け取る)
+ * - connection:<provider> → Account 側(server)で解決(PBI-0009。§40「解決は Account 側で行う」)。
+ *   POST /v1/connections/:provider/resolve を叩き、返る env をそのまま注入する。
+ *   secret は runtime のローカル credential store(credentials.ts)へは一切書かない —
+ *   毎 sync で引き直すだけ(§40.4「credential 複製しない」)
+ */
+async function resolveCredentialRef(
   ref: string | null,
   env: Env,
-): { ok: true; env: Record<string, string> } | { ok: false; detail: string } {
+  options: ReconcileOptions,
+): Promise<{ ok: true; env: Record<string, string> } | { ok: false; detail: string }> {
   if (ref == null) return { ok: true, env: {} };
-  const m = /^env:(.+)$/.exec(ref);
-  if (!m) return { ok: false, detail: `未対応の credential_ref scheme です: ${ref}` };
-  const name = m[1]!;
-  const value = env[name];
-  if (!value) return { ok: false, detail: `${ref} を解決できません` };
-  return { ok: true, env: { [name]: value } };
+  const envMatch = /^env:(.+)$/.exec(ref);
+  if (envMatch) {
+    const name = envMatch[1]!;
+    const value = env[name];
+    if (!value) return { ok: false, detail: `${ref} を解決できません` };
+    return { ok: true, env: { [name]: value } };
+  }
+  const connMatch = /^connection:(.+)$/.exec(ref);
+  if (connMatch) {
+    const provider = connMatch[1]!;
+    const res = await apiCall<{ env?: Record<string, string> }>(
+      options.baseUrl,
+      `/v1/connections/${provider}/resolve`,
+      { token: options.token, method: "POST" },
+    );
+    if (res.status !== 200 || !res.body?.env) {
+      return { ok: false, detail: `${ref} を解決できません` };
+    }
+    return { ok: true, env: res.body.env };
+  }
+  return { ok: false, detail: `未対応の credential_ref scheme です: ${ref}` };
 }
 
 function asStringRecord(v: unknown): Record<string, string> {
@@ -146,12 +182,28 @@ export async function reconcile(options: ReconcileOptions): Promise<ReconcileRes
   const applied: ReconcileItemResult[] = [];
   const failed: ReconcileFailure[] = [];
 
+  /**
+   * failed の報告は best-effort。ここまで来ている時点で native 適用か status 報告の
+   * どちらかが既に失敗しているので、報告自体の失敗で 1 件目の失敗理由を握り潰さない
+   * (残りの extension の処理も止めない — 「1 件の失敗で全体を止めない」の維持)
+   */
+  const reportFailure = async (extensionId: string, detail: string): Promise<void> => {
+    await reportStatus(options, extensionId, { status: "failed", detail }).catch(() => {});
+  };
+
   for (const item of plan) {
     if (item.action === "noop") continue;
 
     if (item.action === "unsupported") {
-      await reportStatus(options, item.extensionId, { status: "unsupported", detail: item.detail });
-      applied.push({ action: item.action, name: item.name });
+      try {
+        await reportStatus(options, item.extensionId, {
+          status: "unsupported",
+          detail: item.detail,
+        });
+        applied.push({ action: item.action, name: item.name });
+      } catch (e) {
+        failed.push({ name: item.name, detail: (e as Error).message });
+      }
       continue;
     }
 
@@ -165,16 +217,16 @@ export async function reconcile(options: ReconcileOptions): Promise<ReconcileRes
       } catch (e) {
         const detail = (e as Error).message;
         failed.push({ name: item.name, detail });
-        await reportStatus(options, item.extensionId, { status: "failed", detail });
+        await reportFailure(item.extensionId, detail);
       }
       continue;
     }
 
     // install | update
-    const resolved = resolveCredentialRef(item.credentialRef, env);
+    const resolved = await resolveCredentialRef(item.credentialRef, env, options);
     if (!resolved.ok) {
       failed.push({ name: item.name, detail: resolved.detail });
-      await reportStatus(options, item.extensionId, { status: "failed", detail: resolved.detail });
+      await reportFailure(item.extensionId, resolved.detail);
       continue;
     }
     try {
@@ -193,7 +245,7 @@ export async function reconcile(options: ReconcileOptions): Promise<ReconcileRes
     } catch (e) {
       const detail = (e as Error).message;
       failed.push({ name: item.name, detail });
-      await reportStatus(options, item.extensionId, { status: "failed", detail });
+      await reportFailure(item.extensionId, detail);
     }
   }
 

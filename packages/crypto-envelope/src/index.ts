@@ -148,6 +148,42 @@ export async function seal(
   };
 }
 
+/**
+ * 鍵委譲(Account Recovery — PBI-0010)。既存 recipient(from)の private key で
+ * content key だけを取り出し(ciphertext には触れない)、新 recipient(to)向けに re-wrap する。
+ * 返すのは追加する recipient entry 1 件のみ — 呼び出し元は envelope 全体を作り直さず
+ * `recipients` 配列へ追記できる
+ */
+export async function addRecipient(
+  envelope: EncryptedEnvelope,
+  from: { keyId: string; privateJwk: JsonWebKey },
+  to: { keyId: string; publicJwk: JsonWebKey },
+): Promise<EnvelopeRecipient> {
+  if (envelope.v !== ENVELOPE_VERSION || envelope.suite !== SUITE_ID) {
+    throw new Error(`unsupported envelope version/suite: ${envelope.v}/${envelope.suite}`);
+  }
+  const mine = envelope.recipients.find((r) => r.device_key_id === from.keyId);
+  if (!mine) throw new Error("this device is not a recipient of the envelope");
+
+  const recipient = await suite.createRecipientContext({
+    recipientKey: await importPrivate(from.privateJwk),
+    enc: b64u.decode(mine.enc) as BufferSource,
+  });
+  const contentKeyRaw = await recipient.open(
+    b64u.decode(mine.wrapped_key) as BufferSource,
+  );
+
+  const sender = await suite.createSenderContext({
+    recipientPublicKey: await importPublic(to.publicJwk),
+  });
+  const wrappedKey = await sender.seal(contentKeyRaw as BufferSource);
+  return {
+    device_key_id: to.keyId,
+    enc: b64u.encode(sender.enc),
+    wrapped_key: b64u.encode(wrappedKey),
+  };
+}
+
 export async function open(
   envelope: EncryptedEnvelope,
   device: { keyId: string; privateJwk: JsonWebKey },
@@ -176,6 +212,49 @@ export async function open(
     { name: "AES-GCM", iv: b64u.decode(envelope.iv) as BufferSource },
     contentKey,
     b64u.decode(envelope.ciphertext) as BufferSource,
+  );
+  return new Uint8Array(plaintext);
+}
+
+// ---------- 添付の実体(PBI-0074 / W13) ----------
+// envelope の外に置く blob 用の 1 回鍵 AEAD。keyB64 は FileRef.key に入り、FileRef ごと
+// envelope 平文に seal される — つまり内容鍵は宛先 device の HPKE の内側に入る。server は
+// blob も keyB64 も平文で見ない(E2EE アーキ §9 を添付に貫く)。
+
+export interface FileCrypt {
+  ciphertext: Uint8Array;
+  /** base64(key 32byte ‖ iv 12byte)。FileRef.key に入れる値 */
+  keyB64: string;
+}
+
+export async function encryptFileBytes(bytes: Uint8Array): Promise<FileCrypt> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt"]);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    bytes as BufferSource,
+  );
+  const combined = new Uint8Array(44);
+  combined.set(raw, 0);
+  combined.set(iv, 32);
+  return { ciphertext: new Uint8Array(ciphertext), keyB64: b64u.encode(combined) };
+}
+
+export async function decryptFileBytes(
+  ciphertext: Uint8Array,
+  keyB64: string,
+): Promise<Uint8Array> {
+  const combined = b64u.decode(keyB64);
+  if (combined.length !== 44) throw new Error("invalid file key length");
+  const raw = combined.slice(0, 32);
+  const iv = combined.slice(32);
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    ciphertext as BufferSource,
   );
   return new Uint8Array(plaintext);
 }

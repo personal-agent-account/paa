@@ -41,6 +41,8 @@ export type PairOutcome =
 const MAX_CONSECUTIVE_TRANSIENT = 5;
 /** 一過性の失敗時に interval を伸ばす上限(ms) */
 const MAX_BACKOFF_MS = 30_000;
+/** pair/start の撃ち直し間隔の初期値(ms)。0.5 → 1 → 2 → 4 秒、5 回目で諦める(合計 7.5 秒) */
+const START_BACKOFF_MS = 500;
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -51,12 +53,63 @@ type Poll =
   /** retry しても直らない失敗(4xx・約束外の応答) */
   | { kind: "fatal"; detail: string };
 
+/**
+ * fetch が reject した時の 1 行。生の message(Bun: "Unable to connect. Is the computer able to
+ * access the url?")は人向けの説明として長く、stack trace と見分けが付かないので、
+ * error code(`ConnectionRefused` / `ECONNREFUSED` 等)が有ればそれだけを添える
+ */
+function unreachableDetail(baseUrl: string, e: unknown): string {
+  const code = (e as { code?: unknown })?.code;
+  const why = typeof code === "string" && code ? code : (e as Error)?.message ?? String(e);
+  return `${baseUrl} に接続できません(${why})`;
+}
+
+/**
+ * pair/start。claim と同じ一過性判定で最大 MAX_CONSECUTIVE_TRANSIENT 回まで撃ち直す —— 1 回目の
+ * fetch が reject しただけで例外を上げると、`paa login` は NG 表示ではなく生の stack trace で
+ * 落ちる(PBI-0046 レビュー AC-X2)。server 指定の interval はまだ無いので固定の指数 backoff
+ */
+async function startPairing(
+  options: PairOptions,
+  sleep: (ms: number) => Promise<void>,
+): Promise<{ kind: "body"; body: any } | { kind: "failed"; detail: string }> {
+  let transient = 0;
+  for (;;) {
+    let detail: string;
+    try {
+      const res = await apiCall(options.baseUrl, "/v1/pair/start", {
+        body: { name: options.name, kind: options.kind },
+      });
+      if (res.status === 201 && res.body != null && typeof res.body === "object") {
+        return { kind: "body", body: res.body };
+      }
+      if (res.status >= 500 || res.status === 429 || res.status === 408) {
+        detail = `pair/start が ${res.status} を返しました`;
+      } else if (res.status === 201) {
+        detail = "pair/start の応答が JSON ではありません";
+      } else {
+        return {
+          kind: "failed",
+          detail: `pair/start が ${res.status} を返しました: ${JSON.stringify(res.body)}`,
+        };
+      }
+    } catch (e) {
+      detail = unreachableDetail(options.baseUrl, e);
+    }
+    transient++;
+    if (transient >= MAX_CONSECUTIVE_TRANSIENT) {
+      return { kind: "failed", detail: `${detail}(${transient} 回連続)` };
+    }
+    await sleep(Math.min(START_BACKOFF_MS * 2 ** (transient - 1), MAX_BACKOFF_MS));
+  }
+}
+
 async function pollClaim(baseUrl: string, deviceCode: string): Promise<Poll> {
   let res;
   try {
     res = await apiCall(baseUrl, "/v1/pair/claim", { body: { device_code: deviceCode } });
   } catch (e) {
-    return { kind: "transient", detail: `${baseUrl} に接続できません: ${(e as Error).message}` };
+    return { kind: "transient", detail: unreachableDetail(baseUrl, e) };
   }
   if (res.status >= 500 || res.status === 429 || res.status === 408) {
     return { kind: "transient", detail: `pair/claim が ${res.status} を返しました` };
@@ -77,12 +130,9 @@ async function pollClaim(baseUrl: string, deviceCode: string): Promise<Poll> {
 export async function pairRuntime(options: PairOptions): Promise<PairOutcome> {
   const sleep = options.sleep ?? defaultSleep;
   const now = options.now ?? Date.now;
-  const start = await apiCall(options.baseUrl, "/v1/pair/start", {
-    body: { name: options.name, kind: options.kind },
-  });
-  if (start.status !== 201) {
-    throw new Error(`pair/start failed: ${start.status} ${JSON.stringify(start.body)}`);
-  }
+  const started = await startPairing(options, sleep);
+  if (started.kind === "failed") return { status: "failed", detail: started.detail };
+  const start = { body: started.body };
   const prompt: PairPrompt = {
     user_code: start.body.user_code,
     verification_uri: start.body.verification_uri,
