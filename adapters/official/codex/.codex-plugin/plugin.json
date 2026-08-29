@@ -1,0 +1,5 @@
+{
+  "name": "paa",
+  "version": "0.1.0",
+  "description": "Attach Personal Agent Account to Codex (pairing via `paa pair codex`)"
+}

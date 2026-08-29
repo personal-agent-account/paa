@@ -22,6 +22,18 @@ paper. See `adapters/official/claude` and `adapters/official/codex`. Gemini CLI 
 
 Requires [Bun](https://bun.com) 1.2+.
 
+Or skip the clone and install directly as a runtime plugin (inside Claude Code / Codex):
+
+```bash
+# Claude Code:
+claude plugin marketplace add personal-agent-account/paa
+# Codex:
+codex plugin marketplace add personal-agent-account/paa
+```
+
+> The plugin registers the MCP entry points; pairing your machine to your account
+> (`paa login` + `paa pair <runtime>` below) is still required.
+
 ```bash
 git clone https://github.com/personal-agent-account/paa.git
 cd paa && bun install

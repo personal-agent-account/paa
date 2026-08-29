@@ -1,0 +1,20 @@
+{
+  "name": "paa",
+  "interface": {
+    "displayName": "Personal Agent Account"
+  },
+  "plugins": [
+    {
+      "name": "paa",
+      "source": {
+        "source": "local",
+        "path": "./adapters/official/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
