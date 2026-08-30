@@ -18,3 +18,11 @@ export const sendInputShape = {
   files: z.array(fileRefShape).optional(),
   force: z.boolean().optional().describe("already_handled の thread へ強制送信"),
 };
+
+export const replyInputShape = {
+  thread_id: z.string().describe("返信先の thread id(owner との共有 thread 含む)"),
+  text: z.string().optional(),
+  urls: z.array(z.string()).optional(),
+  files: z.array(fileRefShape).optional(),
+  force: z.boolean().optional().describe("already_handled の thread へ強制送信"),
+};

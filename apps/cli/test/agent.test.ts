@@ -55,7 +55,7 @@ const provider = Bun.serve({
   fetch: async (req) => {
     const body = await req.json().catch(() => null);
     providerCalls.push({ body, auth: req.headers.get("authorization") });
-    if (providerStatus !== 200) return Response.json({ error: "boom" }, { status: providerStatus });
+    if (providerStatus !== 200) return Response.json({ error: "boom" }, { status: providerStatus }); // gitleaks:allow (header 名への誤検知)
     return Response.json({ choices: [{ message: { content: providerContent } }] });
   },
 });

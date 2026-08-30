@@ -2,7 +2,7 @@
   "mcp_servers": {
     "paa": {
       "command": "bun",
-      "args": ["${PLUGIN_ROOT}/mcp-server.ts"],
+      "args": ["${PLUGIN_ROOT}/mcp-server.bundle.js"],
       "env": {
         "PAA_RUNTIME_KIND": "codex"
       }

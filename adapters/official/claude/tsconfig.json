@@ -3,5 +3,5 @@
   "compilerOptions": {
     "lib": ["ESNext", "DOM"]
   },
-  "include": ["src", "mcp-server.ts", "test"]
+  "include": ["src", "test"]
 }

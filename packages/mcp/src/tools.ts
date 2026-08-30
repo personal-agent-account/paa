@@ -61,8 +61,24 @@ export interface SendInput {
   force?: boolean;
 }
 
-/** §16 contract の 8 操作。MCP server と検査の双方がこの実装を使う */
+export interface ReplyInput {
+  thread_id: string;
+  text?: string;
+  urls?: string[];
+  files?: { name: string; ref: string }[];
+  force?: boolean;
+}
+
+/** §16 contract の 8 操作 + reply(PBI-0094)。MCP server と検査の双方がこの実装を使う */
 export function createAccountTools(config: PaaClientConfig) {
+  // reply の seal 宛先 = 自分の handle(返信先は自分の Account 内の thread)。whoami は 1 回だけ
+  // 引いて cache する(tool 呼び出し毎の往復を避ける)
+  let ownHandle: Promise<string> | null = null;
+  const resolveOwnHandle = () =>
+    (ownHandle ??= (async () => {
+      const who = (await call(config, "/v1/whoami")) as { handle: string };
+      return who.handle;
+    })());
   return {
     whoami: () => call(config, "/v1/whoami"),
     inbox_list: () => call(config, "/v1/inbox/messages"),
@@ -74,6 +90,18 @@ export function createAccountTools(config: PaaClientConfig) {
       const { to, text, urls, files, force } = input;
       const content = await sealForHandle(e2eeCall(config), deviceKindOf(config), to, { text, urls, files });
       return call(config, "/v1/send", { body: { to, force, ...content } });
+    },
+    // owner instruction thread への報告(PBI-0094)。E2EE は send と同じ作法 —
+    // 自 handle の device 鍵宛に seal してから POST する(server 側の requestReply が actor を照合する)
+    reply: async (input: ReplyInput) => {
+      const { thread_id, text, urls, files, force } = input;
+      const handle = await resolveOwnHandle();
+      const content = await sealForHandle(e2eeCall(config), deviceKindOf(config), handle, {
+        text,
+        urls,
+        files,
+      });
+      return call(config, `/v1/threads/${thread_id}/reply`, { body: { force, ...content } });
     },
     contacts_list: () => call(config, "/v1/contacts"),
     contacts_get: (contactId: string) => call(config, `/v1/contacts/${contactId}`),

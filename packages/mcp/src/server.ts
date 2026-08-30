@@ -7,7 +7,7 @@ import { credentialsPath, getCredential } from "@paa/adapter";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { sendInputShape } from "./schemas.ts";
+import { replyInputShape, sendInputShape } from "./schemas.ts";
 import { createAccountTools } from "./tools.ts";
 
 // credential は pairing で保存済みのものを使う(要件 §15.2: API key の copy/paste を標準 UX に
@@ -60,6 +60,13 @@ server.tool(
   "@handle 宛に message を送る。delegation policy により承認待ち(pending_approval)になることがある",
   sendInputShape,
   async (input) => json(await tools.send(input)),
+);
+
+server.tool(
+  "reply",
+  "自分の Account 内の thread に返信する(owner との共有 thread。owner instruction の結果報告先)",
+  replyInputShape,
+  async (input) => json(await tools.reply(input)),
 );
 
 server.tool("contacts_list", "contacts 一覧", {}, async () =>

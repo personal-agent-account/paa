@@ -13,7 +13,9 @@ export type DelegationReason =
   | "unknown_sender"
   | "contact_auto_reply"
   | "account_ask"
-  | "account_auto";
+  | "account_auto"
+  /** 宛先が自分自身の account(owner instruction thread。PBI-0094)。外への副作用が無い為 allow */
+  | "self_thread";
 
 export interface DelegationResult {
   decision: DelegationDecision;
@@ -87,6 +89,10 @@ export interface ReplyDecisionInput {
   peerKnownContact: boolean;
   policy: AccountDelegationPolicy;
   contactOverride?: ContactDelegationOverride;
+  /** 宛先が自分自身の account か(owner instruction thread。PBI-0094)。unknown sender /
+   * read_only より前に判定する — owner の自分宛て thread は外への副作用が無く、human が
+   * 同一 thread 内で直接指示しているので draft:false でも返信を許す */
+  peerIsSelf?: boolean;
 }
 
 export function decideSend(input: ReplyDecisionInput): DelegationResult {
@@ -98,6 +104,11 @@ export function decideSend(input: ReplyDecisionInput): DelegationResult {
   );
   if (input.actor.kind === "human") {
     return { decision: "allow", reason: "human_owner", stage, override: false };
+  }
+  // 自分宛て thread(owner instruction。PBI-0094)は read_only(draft:false)より前に許可する。
+  // 返信先が owner 自身で外への配送が発生しない為、read_only runtime も同一 thread に報告できる
+  if (input.peerIsSelf) {
+    return { decision: "allow", reason: "self_thread", stage, override: false };
   }
   if (!mail.draft) {
     return { decision: "deny", reason: "read_only", stage, override: overrideKeys.has("draft") };

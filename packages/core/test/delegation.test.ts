@@ -185,6 +185,28 @@ describe("decideSend の runtime override(PBI-0030 AC-1/2)", () => {
     expect(mailStage(resolveMailPolicy(policy, "rt_x"))).toBe("read");
     expect(mailStage(resolveMailPolicy(policy, "rt_y"))).toBe("ask");
   });
+
+  test("PBI-0094: peerIsSelf は unknown / read_only より前に allow(self_thread)", () => {
+    const runtime = { kind: "runtime", runtimeId: "rt_x" } as const;
+    // unknown sender(peerKnownContact: false)でも自分宛ては allow
+    expect(
+      decideSend({ actor: runtime, peerKnownContact: false, policy: DEFAULT_DELEGATION_POLICY, peerIsSelf: true }),
+    ).toEqual({ decision: "allow", reason: "self_thread", stage: "ask", override: false });
+    // read_only(draft:false)でも自分宛ては allow(owner への報告は外への副作用が無い)
+    const readOnly: AccountDelegationPolicy = {
+      mail: { ...DEFAULT_DELEGATION_POLICY.mail, draft: false },
+    };
+    expect(
+      decideSend({ actor: runtime, peerKnownContact: false, policy: readOnly, peerIsSelf: true }),
+    ).toEqual({ decision: "allow", reason: "self_thread", stage: "read", override: false });
+    // peerIsSelf が無ければ従来どおり(unknown → ask / read_only → deny)
+    expect(
+      decideSend({ actor: runtime, peerKnownContact: false, policy: DEFAULT_DELEGATION_POLICY }).decision,
+    ).toBe("ask");
+    expect(
+      decideSend({ actor: runtime, peerKnownContact: false, policy: readOnly }).decision,
+    ).toBe("deny");
+  });
 });
 
 describe("decideBucket(図3 の判定順序)", () => {
