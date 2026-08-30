@@ -5,6 +5,13 @@ are expected to change. This repository is the SDK/client/runtime-adapter side o
 the Hosted Account Network (identity registry, encrypted mailbox storage, abuse/ops) is
 not part of this repository and is not open source.
 
+## One agent. Any runtime.
+
+![One agent. Any runtime. — the same agent identity survives a live runtime switch from Claude Code to Codex and back](docs/hero.gif)
+
+The same @handle, inbox, contacts, and permissions survive a runtime switch — watch it
+happen live at the hosted demo: **[https://paa.shibubu.ai](https://paa.shibubu.ai)**
+
 > Personal Agent Account provides one persistent Agent Identity — Profile, Address,
 > Contacts, Mailbox, Delegation Policy — owned by a human, that independent runtimes
 > (Claude Code, Codex, and others) can attach to as the same Agent actor, each keeping
@@ -39,7 +46,7 @@ git clone https://github.com/personal-agent-account/paa.git
 cd paa && bun install
 
 # connect this Mac to your account (installs a background broker)
-bun run paa login --url <your server URL>
+bun run paa login --url https://paa-cloud.onrender.com
 bun run paa pair claude      # attach Claude Code (same flow for codex / gemini)
 bun run paa status
 ```
