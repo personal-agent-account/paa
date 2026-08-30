@@ -7,7 +7,8 @@ import { credentialsPath, getCredential } from "@paa/adapter";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { replyInputShape, sendInputShape } from "./schemas.ts";
+import { loadSecrets, maskValue, restoreText } from "./masking.ts";
+import { labelInputShape, replyInputShape, sendInputShape } from "./schemas.ts";
 import { createAccountTools } from "./tools.ts";
 
 // credential は pairing で保存済みのものを使う(要件 §15.2: API key の copy/paste を標準 UX に
@@ -26,12 +27,25 @@ const tools = createAccountTools({
   baseUrl: process.env.PAA_URL ?? stored?.base_url ?? "http://localhost:8787",
   token,
   deviceKind: kind ?? "default",
+  // triage session(EP-0013 W3)。broker が dedicated session の env に載せた scope token。
+  // 普通に起動した session には無いので header も送られない = 全権のまま
+  scopeToken: process.env.PAA_SESSION_SCOPE,
 });
+
+// secret masking(REQ-69)。~/.paa/secrets.json が在れば tool 応答の文字列値を `⟨s:n⟩` に置き換え、
+// send / reply の text だけ復元する。0600 以外の file は起動を拒否する(fail-closed)
+let secrets: string[];
+try {
+  secrets = loadSecrets();
+} catch (e) {
+  console.error(`secrets.json を読めません: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
 
 const server = new McpServer({ name: "paa-account", version: "0.1.0" });
 
 const json = (v: unknown) => ({
-  content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }],
+  content: [{ type: "text" as const, text: JSON.stringify(maskValue(v, secrets), null, 2) }],
 });
 
 server.tool(
@@ -59,14 +73,27 @@ server.tool(
   "send",
   "@handle 宛に message を送る。delegation policy により承認待ち(pending_approval)になることがある",
   sendInputShape,
-  async (input) => json(await tools.send(input)),
+  // text だけ mask の逆変換(restore)。agent が通知から credential を引用して送れるようにする為
+  async (input) =>
+    json(
+      await tools.send({
+        ...input,
+        text: input.text !== undefined ? restoreText(input.text, secrets) : undefined,
+      }),
+    ),
 );
 
 server.tool(
   "reply",
   "自分の Account 内の thread に返信する(owner との共有 thread。owner instruction の結果報告先)",
   replyInputShape,
-  async (input) => json(await tools.reply(input)),
+  async (input) =>
+    json(
+      await tools.reply({
+        ...input,
+        text: input.text !== undefined ? restoreText(input.text, secrets) : undefined,
+      }),
+    ),
 );
 
 server.tool("contacts_list", "contacts 一覧", {}, async () =>
@@ -92,6 +119,14 @@ server.tool(
   "自分が起こした approval(send/reply の承認待ち)の状態を取得する。pending/approved/rejected。content は含まない",
   { approval_id: z.string() },
   async ({ approval_id }) => json(await tools.approval_get(approval_id)),
+);
+
+server.tool(
+  "notification_label",
+  "notification item に triage label を付ける(action=要対応 / fyi=参考 / discard=不要)。summary は device 鍵で seal して送る",
+  labelInputShape,
+  async ({ message_id, label, summary }) =>
+    json(await tools.notification_label(message_id, label, summary)),
 );
 
 await server.connect(new StdioServerTransport());

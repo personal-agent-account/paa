@@ -54,3 +54,100 @@ export function fromEnvelopePlaintext(p: EnvelopePlaintext): MessageContent {
   if (p.urls !== undefined) c.urls = p.urls;
   return c;
 }
+
+// ---------- item 種別(EP-0013 W1 / 要件 v0.7 §14) ----------
+// message は chat(既存の全経路)と notification(外部 source の着信を持ち込む行)に分かれる。
+// digest は W4(まとめ配信)で使うため先に値集合だけ固定 — DB の check 制約と同じ集合を
+// ここが正本として持つ(diagrams-check.sh が migration 022 との一致を機械検査する)
+
+export const MESSAGE_KINDS = ["chat", "notification", "digest"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+/**
+ * 通知の流れて来る入口。mail / paa は thread から導出できる(deriveSource)。
+ * collector(W2b の android 等)と webhook は行に明示的に載る。値は v0.7 §14 の列挙
+ */
+export const SOURCE_KINDS = [
+  "mail",
+  "paa",
+  "webhook",
+  "android",
+  "windows",
+  "macos",
+  "ios",
+  "digest",
+] as const;
+export type SourceKind = (typeof SOURCE_KINDS)[number];
+
+/** messages.source 列(jsonb)の中身。平文 metadata のみ — 通知本文は content 側に seal される */
+export interface NotificationSource {
+  kind: SourceKind;
+  /** 発生源の app(例: com.example.app)。collector 経路で付く */
+  app_id?: string;
+  /** UI 表示用の app 名。app_id が無い時の fallback 表示にも使う */
+  app_display?: string;
+  /** 発生源側の通知 id。同一 thread 内の重複投入を unique index で弾く(REQ-62) */
+  external_id?: string;
+}
+
+/** thread の peer から source を導出する(既存 chat 行は source 列が null のため) */
+export function deriveSource(thread: {
+  peer_address: string | null;
+  peer_account_id: string | null;
+}): NotificationSource {
+  if (thread.peer_address) return { kind: "mail" };
+  return { kind: "paa" };
+}
+
+// ---------- capture source(EP-0013 W2a / PBI-0114・要件 v0.7 §7.4・§20) ----------
+// 世界からの通知の入口。行を sources 表に持ち、token 認証で POST /v1/inbound/notification に届く。
+// mail / paa / digest は導出・自動なので source 行を作らない(CAPTURE_SOURCE_KINDS から外れている)
+
+/** source 行を作る種別。webhook = W2a の endpoint、android/windows/macos/ios = collector(W2b 以降) */
+export const CAPTURE_SOURCE_KINDS = ["webhook", "android", "windows", "macos", "ios"] as const;
+export type CaptureSourceKind = (typeof CAPTURE_SOURCE_KINDS)[number];
+
+/** sources.status の値集合。DB の check 制約と同じ集合をここが正本として持つ(diagrams-check が機械検査) */
+export const SOURCE_STATUSES = ["active", "paused", "revoked"] as const;
+export type SourceStatus = (typeof SOURCE_STATUSES)[number];
+
+/** owner thread の表示名。AI 宛の指示 thread と同じ 1 本に通知が流れる(messaging.ts から移動) */
+export const OWNER_THREAD_DISPLAY = "Your AI";
+
+/** POST /v1/inbound/notification の L2 body。平文 — server が device 鍵群へ seal する前の形(図43) */
+export interface NotificationPayload {
+  /** 発生源の app(例: com.example.app) */
+  app_id: string;
+  /** UI 表示用の app 名 */
+  app_display?: string;
+  /** 発生源側の通知 id。無ければ server が内容 hash から生成する(REQ-62) */
+  external_id?: string;
+  /** 通知タイトル。必須 — 無い物は 422 invalid_payload */
+  title: string;
+  body?: string;
+  /** 通知を開く URL(任意) */
+  url?: string;
+  /** 発生源側の発生日時(任意。hash の分単位 bucket は受信時刻基準) */
+  occurred_at?: string;
+}
+
+// ---------- triage の 3 軸(EP-0013 W3 / PBI-0117・要件 v0.7 §15) ----------
+// 対処状態の軸 2(triage label)と軸 3(handling)。既読(軸 1)は既存 read_states のまま。
+// 値集合の正本はここ — DB の check 制約(migration 024)と同じ集合を
+// diagrams-check.sh が機械検査する。triage session は triage_label と summary だけを
+// 変える(handling は rule engine / 実行 agent / 人が担う・REQ-64)
+
+/** triage label の値集合。none = 未対処( triage pending の対象) */
+export const TRIAGE_LABELS = ["none", "action", "fyi", "discard"] as const;
+export type TriageLabel = (typeof TRIAGE_LABELS)[number];
+
+/** item の処理状態。digest 遷移(digest_pending→digested)は W4 の scheduler が担う */
+export const HANDLING_STATES = [
+  "open",
+  "digest_pending",
+  "digested",
+  "in_progress",
+  "done",
+  "dismissed",
+] as const;
+export type HandlingState = (typeof HANDLING_STATES)[number];

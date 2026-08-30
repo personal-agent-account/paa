@@ -1,6 +1,6 @@
 // PAA Account tools contract(要件 §16)の実装。
-// runtime は paired credential で HTTP API を叩く。tool は §16 の 8 操作:
-// whoami / inbox.list / inbox.read / send / contacts.list / contacts.get / mark_read / approval_get。
+// runtime は paired credential で HTTP API を叩く。tool は §16 の 8 操作 + reply(PBI-0094)
+// + notification_label(EP-0013 W3 triage)。
 // memory.* / task.* / browser.* 等は提供しない(要件 §16 の非提供リスト)。
 //
 // PBI-0006(要件 §9-11): send / inbox_read は sender・recipient 双方の account が
@@ -15,6 +15,10 @@ export interface PaaClientConfig {
   token: string;
   /** device key の永続化単位(credential store の kind と同じ)。省略時は "default" */
   deviceKind?: string;
+  /** triage session の scope token(EP-0013 W3 / REQ-61 ②)。broker が dedicated session の
+   * env `PAA_SESSION_SCOPE` に載せた物を server.ts が受けて全 request の header に付ける。
+   * 無ければ header 自体を送らない(Manual / AUTO / owner lane は従来どおり全権) */
+  scopeToken?: string;
 }
 
 export class PaaApiError extends Error {
@@ -36,6 +40,9 @@ async function call(
     headers: {
       authorization: `Bearer ${config.token}`,
       "content-type": "application/json",
+      // triage scope(REQ-61 ②)。無効 / 期限切れ token は server 側が 401 invalid_scope_token で
+      // 拒む(fail-closed)。在る時だけ送る
+      ...(config.scopeToken ? { "x-paa-session-scope": config.scopeToken } : {}),
     },
     ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
@@ -67,6 +74,8 @@ export interface ReplyInput {
   urls?: string[];
   files?: { name: string; ref: string }[];
   force?: boolean;
+  /** §18: 結果 item が処理対象の notification id を運ぶ(owner thread 報告のみ意味を持つ) */
+  refs?: string[];
 }
 
 /** §16 contract の 8 操作 + reply(PBI-0094)。MCP server と検査の双方がこの実装を使う */
@@ -92,16 +101,19 @@ export function createAccountTools(config: PaaClientConfig) {
       return call(config, "/v1/send", { body: { to, force, ...content } });
     },
     // owner instruction thread への報告(PBI-0094)。E2EE は send と同じ作法 —
-    // 自 handle の device 鍵宛に seal してから POST する(server 側の requestReply が actor を照合する)
+    // 自 handle の device 鍵宛に seal してから POST する(server 側の requestReply が actor を照合する)。
+    // refs(§18)は本文と別の平文 metadata として body に載せる(id のみ — server が検証する)
     reply: async (input: ReplyInput) => {
-      const { thread_id, text, urls, files, force } = input;
+      const { thread_id, text, urls, files, force, refs } = input;
       const handle = await resolveOwnHandle();
       const content = await sealForHandle(e2eeCall(config), deviceKindOf(config), handle, {
         text,
         urls,
         files,
       });
-      return call(config, `/v1/threads/${thread_id}/reply`, { body: { force, ...content } });
+      return call(config, `/v1/threads/${thread_id}/reply`, {
+        body: { force, ...(refs?.length ? { refs } : {}), ...content },
+      });
     },
     contacts_list: () => call(config, "/v1/contacts"),
     contacts_get: (contactId: string) => call(config, `/v1/contacts/${contactId}`),
@@ -110,6 +122,23 @@ export function createAccountTools(config: PaaClientConfig) {
     // PBI-0031: 自分が起こした approval の pending/approved/rejected を polling できる。
     // content は server が返さない(human の編集後本文を runtime に見せる理由が無い)
     approval_get: (approvalId: string) => call(config, `/v1/approvals/${approvalId}`),
+    // triage の出力面(EP-0013 W3 / REQ-64)。label は notification item にだけ付く。
+    // summary は自 handle の device 鍵で seal してから送る — 平文 summary の送信面は作らない
+    // (account に device が 0 本で seal 出来ない時は 422 で失敗させる。平文 fallback は downgrade)
+    notification_label: async (messageId: string, label: string, summary?: string) => {
+      const body: { label: string; summary?: { envelope: unknown } } = { label };
+      if (summary !== undefined && summary.trim() !== "") {
+        const handle = await resolveOwnHandle();
+        const sealed = await sealForHandle(e2eeCall(config), deviceKindOf(config), handle, {
+          text: summary,
+        });
+        if (!("envelope" in sealed)) {
+          throw new PaaApiError(422, { error: "summary_requires_device_key" });
+        }
+        body.summary = { envelope: sealed.envelope };
+      }
+      return call(config, `/v1/messages/${messageId}/label`, { body });
+    },
   };
 }
 

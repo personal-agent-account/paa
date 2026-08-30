@@ -26,6 +26,7 @@ const CONTRACT_TOOLS = [
   "inbox_list",
   "inbox_read",
   "mark_read",
+  "notification_label",
   "reply",
   "send",
   "whoami",

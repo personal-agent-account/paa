@@ -25,4 +25,19 @@ export const replyInputShape = {
   urls: z.array(z.string()).optional(),
   files: z.array(fileRefShape).optional(),
   force: z.boolean().optional().describe("already_handled の thread へ強制送信"),
+  refs: z
+    .array(z.string())
+    .optional()
+    .describe("処理した notification item の id(§18。owner instruction thread への報告で参照先を done にする)"),
+};
+
+// triage(EP-0013 W3)の label 付け。MCP からは "none" を見せない(label 無し状態への復帰は
+// human の web UI / API が担う — triage agent が未処理に戻す経路は作らない)。
+export const labelInputShape = {
+  message_id: z.string().describe("notification item の message id"),
+  label: z.enum(["action", "fyi", "discard"]).describe("action=要対応 / fyi=参考 / discard=不要"),
+  summary: z
+    .string()
+    .optional()
+    .describe("短い要約(140 字以内推奨)。MCP が device 鍵で seal してから送る"),
 };
