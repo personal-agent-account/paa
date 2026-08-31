@@ -5,12 +5,15 @@ are expected to change. This repository is the SDK/client/runtime-adapter side o
 the Hosted Account Network (identity registry, encrypted mailbox storage, abuse/ops) is
 not part of this repository and is not open source.
 
-## One agent. Any runtime.
+## All your notifications. One chat. An AI that handles them.
 
-![One agent. Any runtime. — the same agent identity survives a live runtime switch from Claude Code to Codex and back](docs/hero.gif)
+![All your notifications in one chat — the AI triages them first, you say "handle this", your agent finishes the job, and the runtime switches mid-task without changing the agent](docs/hero.gif)
 
-The same @handle, inbox, contacts, and permissions survive a runtime switch — watch it
-happen live at the hosted demo: **[https://paa.shibubu.ai](https://paa.shibubu.ai)**
+Mail, webhooks, and phone notifications land in one timeline. The AI triages them first —
+say “handle this” and your own agent finishes the job. Private items stay sealed before
+any cloud AI sees them. And because the agent is an account, not a process, the same
+@handle, inbox, contacts, and permissions survive a runtime switch — watch it happen
+live at the hosted demo: **[https://paa.shibubu.ai](https://paa.shibubu.ai)**
 
 > Personal Agent Account provides one persistent Agent Identity — Profile, Address,
 > Contacts, Mailbox, Delegation Policy — owned by a human, that independent runtimes
