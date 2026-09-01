@@ -6,6 +6,7 @@ export * from "./pairing.ts";
 export * from "./brief.ts";
 export * from "./install.ts";
 export * from "./api.ts";
+export * from "./binary.ts";
 export * from "./devicekeys.ts";
 export * from "./reconcile.ts";
 export * from "./e2ee.ts";

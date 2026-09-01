@@ -1,4 +1,7 @@
+import { accessSync, constants, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { paaHome } from "./credentials.ts";
 import {
   run,
   type AdapterContext,
@@ -24,6 +27,43 @@ import { STAGE0_CAPABILITIES } from "./contract.ts";
 // **argv を宣言でなく関数で受ける**のは意図的: `-s user` の要否・`-e` と `--env` の違い・
 // name と command の順序・`--` の有無は CLI ごとにばらばらで、宣言でカバーしようとすると
 // 設定項目の量産になる。config の読み方だけを宣言にし、argv は 3〜10 行の関数にするのが最小。
+
+/** MCP server をどう起動するか。binary が在れば `{command: binary, args: []}`、無ければ `bun <entry>` */
+export interface McpServerCommand {
+  command: string;
+  args: string[];
+}
+
+/** 実行可能な **file** か。dir は X_OK が立つので除く(`~/.paa/bin/paa-mcp` が dir でも exec できない) */
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * MCP server の起動 command を解決する(PBI-0132)。
+ * `PAA_MCP_BINARY` → `<PAA_HOME>/bin/paa-mcp` → `bun <entry>` の順で、**実際に実行できる物だけ**を
+ * 採る —— 指定された path が無い / 実行権が無い時に黙って次へ落ちるのは、存在しない command を
+ * runtime の config に書き込むと「登録は成功したのに起動だけ静かに失敗する」形になるため。
+ *
+ * bun は最後の fallback = 「開発者が使う道具」に降りる。binary が置かれている環境では bun を呼ばない。
+ * plugin 側の同じ順序は `packages/mcp/paa-mcp`(sh launcher)が持つ —— 静的 JSON は分岐できないので、
+ * **判定は 2 箇所にあるが順序は 1 つ**(検査で両方を固定する)。
+ */
+export function resolveMcpServerCommand(
+  serverEntry: string,
+  env: Record<string, string | undefined> = process.env,
+): McpServerCommand {
+  for (const candidate of [env.PAA_MCP_BINARY, join(paaHome(env), "bin", "paa-mcp")]) {
+    if (candidate && isExecutableFile(candidate)) return { command: candidate, args: [] };
+  }
+  return { command: "bun", args: [serverEntry] };
+}
 
 /** `addArgs` に渡す材料。env は `[key, value]` の並び(CLI ごとに `-e K=V` / `--env K=V` に組む) */
 export interface McpAddInput {
@@ -101,8 +141,7 @@ export function createMcpConfigAdapter(spec: McpConfigSpec): RuntimeAdapter {
           ["PAA_RUNTIME_KIND", input.runtimeKind],
           ["PAA_URL", input.baseUrl],
         ],
-        command: "bun",
-        args: [input.serverEntry],
+        ...resolveMcpServerCommand(input.serverEntry, ctx.env),
       });
     },
 

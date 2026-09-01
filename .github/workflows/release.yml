@@ -1,0 +1,47 @@
+# tag を打つと単体実行ファイルを作って Release に添付する(PBI-0137)。
+#
+# `paa install` と plugin の launcher はここで公開された asset を取りに来る
+# (`https://github.com/<owner>/<repo>/releases/download/v<version>/paa-mcp-<target>`)。
+# **公開 repo(personal-agent-account/paa)側で走った Release だけが token 無しで取れる** ——
+# 正本 repo(private)で走らせた場合、asset は private になり取得側は 404 になる。
+# action の版は 2026-08-31 に GitHub API で実測した最新 major:
+#   actions/checkout v7.0.1 / oven-sh/setup-bun v2.2.0 / softprops/action-gh-release v3.0.3
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # Release を作って asset を添付するのに要る(それ以外は要らない)
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      # cross target の runtime は bun が自分で download するので、3 target とも 1 job で作れる
+      - name: build binaries
+        run: ./scripts/build-binaries.sh --out dist
+
+      # 取得側(ensureBinary / launcher)は SHA256SUMS を**必ず**照合する。
+      # ここで作らないと、どちらも「照合表が無い」として取得を諦める(壊れた binary は流れない)
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum paa-mcp-* paa-darwin-* paa-linux-* > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/paa-mcp-darwin-arm64
+            dist/paa-mcp-darwin-x64
+            dist/paa-mcp-linux-x64
+            dist/paa-darwin-arm64
+            dist/paa-darwin-x64
+            dist/paa-linux-x64
+            dist/SHA256SUMS

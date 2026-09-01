@@ -17,7 +17,9 @@ async function cliExists(cmd: string): Promise<boolean> {
 
 async function isolated(extra: Record<string, string> = {}): Promise<AdapterContext> {
   const home = await mkdtemp(join(tmpdir(), "paa-home-"));
-  return { env: { ...process.env, HOME: home, ...extra } };
+  // PAA_HOME も隔離する: binary が在れば register はそれを使う(PBI-0132)ので、
+  // dev 機の ~/.paa/bin/paa-mcp の有無で結果が変わらないようにする
+  return { env: { ...process.env, HOME: home, PAA_HOME: join(home, ".paa"), ...extra } };
 }
 
 /** ユーザー本物の設定が触られていないことを確かめる */
@@ -47,7 +49,7 @@ describe.skipIf(!(await cliExists("claude")))("claude adapter", () => {
 
       await claudeAdapter.register(ctx, registerInput(claudeAdapter));
       const server = (await readServers()).paa;
-      expect(server.command).toBe("bun");
+      expect(server.command).toBe("bun"); // binary の無い環境では従来経路(PBI-0132 AC-3)
       expect(server.args).toEqual([MCP_SERVER_ENTRY]);
       expect(server.env.PAA_RUNTIME_KIND).toBe("claude");
       expect((await claudeAdapter.doctor(ctx, "paa"))[0]?.ok).toBe(true);

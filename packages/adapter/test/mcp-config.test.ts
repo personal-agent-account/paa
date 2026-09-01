@@ -19,7 +19,9 @@ async function installFakeCli(name: string, code = 0): Promise<void> {
   await chmod(join(bin, name), 0o755);
 }
 
-const ctx = (): AdapterContext => ({ env: { PATH: bin, HOME: root } });
+// PAA_HOME を隔離する: resolveMcpServerCommand(PBI-0132)が dev 機の ~/.paa/bin/paa-mcp を
+// 拾うと、この test の期待(`-- bun /repo/mcp.ts`)が機械ごとに揺れる
+const ctx = (): AdapterContext => ({ env: { PATH: bin, HOME: root, PAA_HOME: join(root, ".paa") } });
 
 const jsonSpec = () => ({
   id: "fakejson",

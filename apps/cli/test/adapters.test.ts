@@ -57,9 +57,14 @@ describe("plugin 配布物(配布戦略 §7.1 plugin-first)", () => {
 
     const mcp = JSON.parse(await readFile(repo(`${dir}/.mcp.json`), "utf8"));
     const server = mcp.mcpServers.paa;
-    expect(server.command).toBe("bun");
+    // PBI-0132: command は launcher(sh)。args は bun fallback 経路の材料として bundle のまま
+    expect(server.command).toBe("${CLAUDE_PLUGIN_ROOT}/paa-mcp");
     expect(server.args[0]).toContain("${CLAUDE_PLUGIN_ROOT}");
     expect(server.env.PAA_RUNTIME_KIND).toBe("claude");
+
+    const launcher = await stat(server.command.replace("${CLAUDE_PLUGIN_ROOT}", repo(dir)));
+    expect(launcher.isFile()).toBe(true);
+    expect(launcher.mode & 0o111).toBeGreaterThan(0); // 実行権が無いと runtime は起動できない
 
     const entry = server.args[0].replace("${CLAUDE_PLUGIN_ROOT}", repo(dir));
     expect((await stat(entry)).isFile()).toBe(true);

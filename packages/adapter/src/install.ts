@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { apiCall } from "./api.ts";
+import { ensureBinary, type EnsureBinaryOutcome } from "./binary.ts";
 import {
   getCredential,
   removeCredential,
@@ -86,6 +87,10 @@ export async function installRuntime(options: InstallOptions): Promise<InstallOu
     paired = true;
   }
 
+  // register の**前**に binary を置く —— register が書き込む command は
+  // resolveMcpServerCommand(PBI-0132)の結果なので、順序が逆だと今回の install だけ bun のまま残る
+  const binary = await ensureBinary("paa-mcp", { env });
+
   await adapter.register(ctx, {
     serverEntry: options.serverEntry ?? MCP_SERVER_ENTRY,
     runtimeKind: adapter.id,
@@ -97,8 +102,34 @@ export async function installRuntime(options: InstallOptions): Promise<InstallOu
     status: "installed",
     credential,
     paired,
-    findings: await doctorRuntime({ ...options, serverName }),
+    findings: [binaryFinding(binary), ...(await doctorRuntime({ ...options, serverName }))],
   };
+}
+
+/**
+ * binary 取得の結果を 1 finding に。**取れなかったこと自体は失敗ではない**(bun 経路で動く)ので
+ * ok:true —— ここを false にすると network が無いだけで `paa install` が exit 1 になる。
+ * checksum 不一致だけは ok:false(壊れた / すり替えられた binary は黙って流さない)。
+ */
+function binaryFinding(outcome: EnsureBinaryOutcome): Finding {
+  switch (outcome.status) {
+    case "present":
+      return { ok: true, label: "MCP binary", detail: `${outcome.path}(最新版が置かれています)` };
+    case "downloaded":
+      return {
+        ok: true,
+        label: "MCP binary",
+        detail: `${outcome.path} に ${outcome.target} 版を取得しました(bun 不要で起動します)`,
+      };
+    case "checksum_mismatch":
+      return { ok: false, label: "MCP binary", detail: `${outcome.detail}。置きませんでした` };
+    default:
+      return {
+        ok: true,
+        label: "MCP binary",
+        detail: `${outcome.detail}。bun 経路で登録します(bun が要ります)`,
+      };
+  }
 }
 
 export interface UninstallOutcome {

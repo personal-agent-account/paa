@@ -8,7 +8,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadSecrets, maskValue, restoreText } from "./masking.ts";
-import { labelInputShape, replyInputShape, sendInputShape } from "./schemas.ts";
+import {
+  labelInputShape,
+  replyInputShape,
+  rulesPutInputShape,
+  sendInputShape,
+} from "./schemas.ts";
 import { createAccountTools } from "./tools.ts";
 
 // credential は pairing で保存済みのものを使う(要件 §15.2: API key の copy/paste を標準 UX に
@@ -96,6 +101,13 @@ server.tool(
     ),
 );
 
+server.tool(
+  "agents_list",
+  "この Account から話しかけられる相手の一覧。runtimes = 同じ Account の runtime(name / kind / is_default / live = 今 wake が届くか)、contacts = 宛先(address は send の to にそのまま渡せる)。相手 Account の稼働状態は返さない(設計上の非公開)",
+  {},
+  async () => json(await tools.agents_list()),
+);
+
 server.tool("contacts_list", "contacts 一覧", {}, async () =>
   json(await tools.contacts_list()),
 );
@@ -127,6 +139,20 @@ server.tool(
   labelInputShape,
   async ({ message_id, label, summary }) =>
     json(await tools.notification_label(message_id, label, summary)),
+);
+
+server.tool(
+  "rules_put",
+  "owner が言葉で頼んだ捌き方を rule として保存する(nl = 言葉の原文・scope = 対象・action = 捌き方)。server が正規化して layer(metadata / content)を決め、正規化済み rule を返す —— 返ってきた rule の内容を owner に 1 文で確認(echo)すること。同じ nl の再 put は上書き更新になる(rule は増えない)。sender / keywords を scope に入れると content rule になり server には暗号化されて保存される",
+  rulesPutInputShape,
+  async (input) => json(await tools.rules_put(input)),
+);
+
+server.tool(
+  "rules_list",
+  "保存済み rule の一覧。content rule の scope は device 鍵で復元して返す",
+  {},
+  async () => json(await tools.rules_list()),
 );
 
 await server.connect(new StdioServerTransport());

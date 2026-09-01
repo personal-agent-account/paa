@@ -5,11 +5,13 @@ import {
   doctorRuntime,
   fetchBrief,
   formatBrief,
+  formatStatusline,
   getCredential,
   installRuntime,
   loadCredentials,
   MCP_SERVER_ENTRY,
   MCP_SERVER_NAME,
+  paaHome,
   pairRuntime,
   reconcile,
   saveCredential,
@@ -48,10 +50,15 @@ const USAGE = `paa —— Personal Agent Account
   uninstall <runtime>   MCP 登録とローカル credential を消す
   pair <runtime>        pairing のみ行う
   status                attach 先と未読の要約を出す (本文は出さない)
+  statusline [--refresh] statusline 用の 1 行を出す (--refresh で取得し直して cache に書く)
   doctor [runtime]      接続状態を診断する
   runtimes              対応 runtime と接続状態の一覧
   extensions            desired extension 一覧 + runtime 別 status
   sync [runtime]        Extension Sync を実行する(runtime 省略時は接続済み全部)
+  admin recover <handle>
+                        運営用: token を失った account に session を 1 本発行する
+                        ($PAA_ADMIN_TOKEN が要る。server 側 env と同じ値)
+
   agent <provider> --thread <id>
                         外部 API provider を端末側 runtime として 1 turn 動かし、
                         返信の下書きを thread へ渡す (${AGENT_PROVIDERS.join(" / ")})
@@ -737,6 +744,35 @@ switch (command) {
     break;
   }
 
+  // PBI-0130: Claude Code の statusline に未読を出す。render 側(statusline.sh)は cache を
+  // cat するだけなので、ここは「取り直して cache を更新する」背景側と、手で覗く読み出し側の 2 つ。
+  case "statusline": {
+    const cachePath = join(paaHome(), "statusline");
+    if (!args.includes("--refresh")) {
+      // 読み出しは network を触らない(statusline が HTTP を待たない事の担保)
+      console.log((await readFile(cachePath, "utf8").catch(() => "")).trimEnd());
+      break;
+    }
+    const credential = (await loadCredentials()).runtimes.claude;
+    if (!credential) break; // 未接続なら黙って何もしない(statusline に error を出さない)
+    try {
+      const segment = formatStatusline(await fetchBrief(credential.base_url, credential.token));
+      // atomic write —— 書きかけの空 file を statusline に読ませない。
+      // 末尾に改行を付けない(cat した物がそのまま 1 行に載る)
+      const tmp = `${cachePath}.tmp`;
+      await writeFile(tmp, segment, { mode: 0o600 });
+      await rename(tmp, cachePath);
+      console.log(segment);
+    } catch (e) {
+      // server 断・auth 失効は「前の値を残す」。cache を消しも上書きもしない ——
+      // 通信が切れた瞬間に statusline の表示が消えるのが一番わかりにくい。
+      // 理由は stderr にだけ出す: statusline.sh は stderr を捨てるので表示は汚れず、
+      // 手で `paa statusline --refresh` を叩いた時だけ原因が見える(黙って空になるのを避ける)
+      console.error(`statusline refresh をやめました: ${(e as Error).message}`);
+    }
+    break;
+  }
+
   case "doctor": {
     let ok = true;
     for (const adapter of target ? [requireAdapter(target)] : ADAPTERS) {
@@ -862,6 +898,39 @@ switch (command) {
       break;
     }
     fail(`NG ${result.detail ?? result.status}`);
+  }
+
+  case "admin": {
+    // 運営が助ける道(PBI-0135・図51 ③)。recovery code を控えていない人を 1 コマンドで戻す。
+    // server 側は PAA_ADMIN_TOKEN が無ければ 503(既定で無効)で、成功も失敗も activity に残る。
+    // `--url` の値を positional と誤認しないよう、直前が --url の要素は除く
+    const positional = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--url");
+    const [sub, rawHandle] = positional;
+    if (sub !== "recover") {
+      fail(`不明な admin サブコマンド: ${sub ?? "(無し)"}\n対応: admin recover <handle>`);
+    }
+    const handle = rawHandle?.replace(/^@+/, "");
+    if (!handle) fail("handle を指定してください (例: paa admin recover shibu)");
+    const adminToken = process.env.PAA_ADMIN_TOKEN;
+    if (!adminToken) {
+      fail("PAA_ADMIN_TOKEN がありません。server 側 env と同じ値を渡してください");
+    }
+    const url = (baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    const res = await apiCall(url, "/v1/admin/sessions", {
+      method: "POST",
+      token: adminToken,
+      body: { handle },
+    });
+    if (res.status === 503) fail("NG server の PAA_ADMIN_TOKEN が未設定です(admin 経路は既定で無効)");
+    if (res.status === 401 || res.status === 403) fail("NG admin token が違います");
+    if (res.status === 404) fail(`NG @${handle} は見つかりません`);
+    if (res.status !== 200) fail(`NG session を発行できません (HTTP ${res.status})`);
+    console.log(`@${res.body.handle} の session token:\n\n  ${res.body.token}\n`);
+    console.log(
+      `本人に安全な経路で渡してください。Sign in の「Session token」に貼ると入れます(${url})。\n` +
+        "以後は Settings › Sign-in methods で passkey か復旧コードを備えるよう伝えてください",
+    );
+    break;
   }
 
   case "--help":

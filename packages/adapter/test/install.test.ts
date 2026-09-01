@@ -47,7 +47,12 @@ const fakeAdapter: RuntimeAdapter = {
 const ctx: AdapterContext = { env: {} };
 
 async function envWithCredential() {
-  const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-doctor-")) };
+  // PAA_BINARY_BASE_URL は誰も listen していない port に向ける —— installRuntime は
+  // binary(PBI-0137)を取りに行くので、指定しないと unit test が公開 Release を叩く
+  const env = {
+    PAA_HOME: await mkdtemp(join(tmpdir(), "paa-doctor-")),
+    PAA_BINARY_BASE_URL: "http://127.0.0.1:1",
+  };
   await saveCredential(
     "claude",
     {
@@ -129,7 +134,7 @@ const other = Bun.serve({
 const otherBase = `http://localhost:${other.port}`;
 afterAll(() => other.stop(true));
 
-const installOptions = (env: { PAA_HOME: string }, baseUrl: string) => ({
+const installOptions = (env: { PAA_HOME: string; PAA_BINARY_BASE_URL: string }, baseUrl: string) => ({
   adapter: fakeAdapter,
   ctx,
   env,

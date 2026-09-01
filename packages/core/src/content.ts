@@ -88,6 +88,8 @@ export interface NotificationSource {
   app_display?: string;
   /** 発生源側の通知 id。同一 thread 内の重複投入を unique index で弾く(REQ-62) */
   external_id?: string;
+  /** 秘匿境界(REQ-68)。rule 適用で ingest 時に決まる。無い行は full 扱い */
+  cloud_visibility?: CloudVisibility;
 }
 
 /** thread の peer から source を導出する(既存 chat 行は source 列が null のため) */
@@ -151,3 +153,60 @@ export const HANDLING_STATES = [
   "dismissed",
 ] as const;
 export type HandlingState = (typeof HANDLING_STATES)[number];
+
+// ---------- 自然言語 rule(EP-0013 W4 / PBI-0119・要件 v0.7 §16) ----------
+// rule = NL 原文つき JSON。値集合の正本はここ — migration 025 の check 制約と同じ集合を
+// diagrams-check.sh が機械検査する。layer の導出規則(REQ-55): scope に sender / keywords
+// (本文・送信者の語)を含む → content(server は評価しない・sealed 保管)、それ以外 →
+// metadata(source_kind / app_id / time_window の平文一致・server が ingest で評価)
+
+export const RULE_LAYERS = ["metadata", "content"] as const;
+export type RuleLayer = (typeof RULE_LAYERS)[number];
+
+export const RULE_ACTION_TYPES = ["immediate", "digest", "discard", "cloud_visibility"] as const;
+export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
+
+/** cloud_visibility の値集合(REQ-68)。masked の server 適用は REQ-69 の MCP masking が担う */
+export const CLOUD_VISIBILITIES = ["full", "masked", "local_only", "none"] as const;
+export type CloudVisibility = (typeof CLOUD_VISIBILITIES)[number];
+
+// ---------- 秘匿境界 L3 = local_only(EP-0013 W6 / REQ-70) ----------
+/** local_only item の content を読める runtime kind の集合。local model server(PBI-0025 の
+ * ollama / lmstudio)と broker(端末常駐 process・LLM 無し)。**fail-closed**: この集合に無い
+ * kind(claude / codex / gemini 等の cloud LLM CLI・今後の detector id 追加分も)は全部
+ * 読めない = 新しい cloud runtime の追加で静かに漏れる経路を構造で潰す。human は常に読める */
+export const LOCAL_ONLY_READER_KINDS = ["broker", "ollama", "lmstudio"] as const;
+export type LocalOnlyReaderKind = (typeof LOCAL_ONLY_READER_KINDS)[number];
+
+export const isLocalOnlyReaderKind = (kind: string): boolean =>
+  (LOCAL_ONLY_READER_KINDS as readonly string[]).includes(kind);
+
+/** local_only item の判定の正本(REQ-70)。notification item のみが対象(digest / chat は外れない)。
+ * source 列が無い既存 chat 行は full 扱い */
+export const isLocalOnlyItem = (m: {
+  kind?: string | null;
+  source?: NotificationSource | null;
+}): boolean => m.kind === "notification" && m.source?.cloud_visibility === "local_only";
+
+/** rule の scope。metadata 部分(source_kind / app_id / time_window)は平文、
+ * sender / keywords は content layer で content_scope(envelope)へ封入される */
+export interface RuleScope {
+  source_kind?: SourceKind;
+  app_id?: string;
+  /** 時間帯の絞り込み。W4 は一致判定のみ(quiet hours の triage 組み込みはスコープ外) */
+  time_window?: string;
+  /** content layer のみ。server には平文で残らない */
+  sender?: string;
+  keywords?: string[];
+}
+
+/** rule の action。type ごとに付く field が決まっている(digest は schedule+tz 必須) */
+export interface RuleAction {
+  type: RuleActionType;
+  /** digest 用。「HH:MM」 */
+  schedule?: string;
+  /** digest 用。IANA tz(例: UTC / Asia/Tokyo) */
+  tz?: string;
+  /** cloud_visibility 用 */
+  visibility?: CloudVisibility;
+}

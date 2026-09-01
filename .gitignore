@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 単体実行ファイル(PBI-0137。1 本 66MB。配布は Release の仕事)
+adapters/official/*/bin/
 coverage/
 
 .env*

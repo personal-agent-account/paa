@@ -8,7 +8,12 @@
 // 無ければ平文のまま送受信する(server 側の強制拒否はしない設計。backlog/PBI-0006 参照)。
 
 import type { MessageContent } from "@paa/core";
-import { openIfEnvelope as openEnvelope, sealForHandle } from "@paa/adapter";
+import { open, type EncryptedEnvelope } from "@paa/crypto-envelope";
+import {
+  getOrCreateDeviceKey,
+  openIfEnvelope as openEnvelope,
+  sealForHandle,
+} from "@paa/adapter";
 
 export interface PaaClientConfig {
   baseUrl: string;
@@ -115,6 +120,9 @@ export function createAccountTools(config: PaaClientConfig) {
         body: { force, ...(refs?.length ? { refs } : {}), ...content },
       });
     },
+    // PBI-0129: agent directory。自 account の runtime(live 付き)と宛先一覧を 1 回で返す。
+    // 読み取りのみ・自 account 内のみ。peer の presence は含まない(要件 v0.6 §28)
+    agents_list: () => call(config, "/v1/agents"),
     contacts_list: () => call(config, "/v1/contacts"),
     contacts_get: (contactId: string) => call(config, `/v1/contacts/${contactId}`),
     mark_read: (messageId: string) =>
@@ -138,6 +146,48 @@ export function createAccountTools(config: PaaClientConfig) {
         body.summary = { envelope: sealed.envelope };
       }
       return call(config, `/v1/messages/${messageId}/label`, { body });
+    },
+    // 自然言語 rule(EP-0013 W4 / REQ-54)。compile は runtime、正規化と layer 導出は server。
+    // 応答の正規化 rule を owner に echo する(REQ-54「解釈を同一 thread で返す」)
+    rules_put: (input: { nl: string; scope?: unknown; action: unknown }) =>
+      call(config, "/v1/rules", { body: input }),
+    // rule の一覧。content rule の nl / sender / keywords は content_scope(envelope)で
+    // 返る為、device 鍵で開いて scope に戻す(封入平文が MessageContent 形でない為、
+    // inbox_read の openIfEnvelope ではなく open を直接使う)
+    rules_list: async () => {
+      const rules = (await call(config, "/v1/rules")) as {
+        nl: string | null;
+        scope: Record<string, unknown>;
+        content_scope: { envelope: unknown } | null;
+      }[];
+      let own: Awaited<ReturnType<typeof getOrCreateDeviceKey>> | null = null;
+      return Promise.all(
+        rules.map(async (rule) => {
+          if (rule.content_scope?.envelope == null) return rule;
+          own ??= await getOrCreateDeviceKey(deviceKindOf(config));
+          try {
+            const bytes = await open(rule.content_scope.envelope as EncryptedEnvelope, own);
+            const plain = JSON.parse(new TextDecoder().decode(bytes)) as {
+              nl: string;
+              sender?: string;
+              keywords?: string[];
+            };
+            const { content_scope, ...rest } = rule;
+            return {
+              ...rest,
+              nl: plain.nl,
+              scope: {
+                ...rest.scope,
+                ...(plain.sender !== undefined ? { sender: plain.sender } : {}),
+                ...(plain.keywords !== undefined ? { keywords: plain.keywords } : {}),
+              },
+            };
+          } catch {
+            // 開けない device でも metadata 部分の一覧は壊さない(envelope はそのまま残す)
+            return rule;
+          }
+        }),
+      );
     },
   };
 }

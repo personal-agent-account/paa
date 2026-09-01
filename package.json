@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "paa": "bun apps/cli/src/paa.ts",
+    "plugin:build": "bun build packages/mcp/src/server.ts --target=bun --outfile adapters/official/claude/mcp-server.bundle.js && bun build packages/mcp/src/server.ts --target=bun --outfile adapters/official/codex/mcp-server.bundle.js && cp packages/mcp/paa-mcp adapters/official/claude/paa-mcp && cp packages/mcp/paa-mcp adapters/official/codex/paa-mcp && chmod +x adapters/official/claude/paa-mcp adapters/official/codex/paa-mcp",
+    "build:binaries": "./scripts/build-binaries.sh",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/crypto-envelope && tsc --noEmit -p packages/adapter && tsc --noEmit -p packages/mcp && tsc --noEmit -p adapters/official/claude && tsc --noEmit -p adapters/official/codex && tsc --noEmit -p apps/cli && tsc --noEmit -p adapters/official/api && tsc --noEmit -p adapters/official/gemini",
     "check": "bun run typecheck && bun test"

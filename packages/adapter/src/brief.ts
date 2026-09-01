@@ -63,3 +63,19 @@ export function formatBrief(brief: SessionBrief): string {
   if (brief.requests > 0) lines.push(`- (requests: ${brief.requests})`);
   return lines.join("\n");
 }
+
+/**
+ * statusline(Claude Code の 1 行)用の segment(PBI-0130)。**件数だけ**を出す ——
+ * 本文はもちろん sender 名も handle も出さない。要件 §19 の境界を CLI 面にも同じ形で当てる
+ * (statusline は常時見えている面 = 画面共有・録画に写り込む面でもある)。
+ *
+ * cache に入るのはこの戻り値そのもの。bash 側(statusline.sh)は cat するだけで、
+ * 組み立ての実装を 2 つに割らない。
+ */
+export function formatStatusline(brief: SessionBrief): string {
+  const dim = (s: string) => `\u001b[38;5;244m${s}\u001b[0m`;
+  const requests = brief.requests > 0 ? `+${brief.requests}` : "";
+  // 未読 0 は「繋がっていて空」を静かに示す(消すと接続の有無が分からなくなる)
+  if (brief.unread <= 0) return dim(`📭${requests}`);
+  return `\u001b[38;5;214m📬${brief.unread}\u001b[0m${requests ? dim(requests) : ""}`;
+}

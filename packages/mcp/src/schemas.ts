@@ -41,3 +41,26 @@ export const labelInputShape = {
     .optional()
     .describe("短い要約(140 字以内推奨)。MCP が device 鍵で seal してから送る"),
 };
+
+// 自然言語 rule(EP-0013 W4 / REQ-54)。runtime が owner の言葉を JSON に compile して渡す。
+// server が layer(metadata / content)を導出し、正規化済み rule を応答として返す ——
+// それを owner に 1 文で echo する(REQ-54「解釈を同一 thread で返す」)のが runtime の仕事。
+// 同じ nl の再 put は更新になる(rule は増えない)
+export const rulesPutInputShape = {
+  nl: z.string().describe("owner の言葉の原文(例: newsletter は毎朝 9 時にまとめて)"),
+  scope: z
+    .object({
+      source_kind: z.enum(["mail", "paa", "webhook", "android", "windows", "macos", "ios", "digest"]).optional(),
+      app_id: z.string().optional().describe("発生源 app(例: com.example.app)。ここで指定した語は metadata として平文保存される"),
+      time_window: z.string().optional(),
+      sender: z.string().optional().describe("本文・送信者の語。指定すると content rule になり server には暗号化されて保存される"),
+      keywords: z.array(z.string()).optional().describe("本文の語。指定すると content rule になる"),
+    })
+    .optional(),
+  action: z.object({
+    type: z.enum(["immediate", "digest", "discard", "cloud_visibility"]),
+    schedule: z.string().optional().describe("digest 用「HH:MM」(例: 09:00)"),
+    tz: z.string().optional().describe("digest 用 IANA tz(例: Asia/Tokyo。既定 UTC)"),
+    visibility: z.enum(["full", "masked", "local_only", "none"]).optional().describe("cloud_visibility 用"),
+  }),
+};

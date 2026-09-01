@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildBrief, formatBrief } from "../src/brief.ts";
+import { buildBrief, formatBrief, formatStatusline } from "../src/brief.ts";
 
 // AC-12: session start(要件 §19)で見せるのは metadata のみ。本文を混ぜない。
 
@@ -77,5 +77,48 @@ describe("session brief", () => {
 
   test("AC-3: window が全未読を覆っていれば「ほか」は出ない", () => {
     expect(formatBrief(buildBrief(whoami, messages))).not.toContain("ほか");
+  });
+});
+
+// PBI-0130: statusline の 1 行。件数だけを出す(要件 §19 の境界を CLI 面にも当てる)
+describe("statusline segment", () => {
+  const brief = (unread: number, requests: number) =>
+    buildBrief({ ...whoami, unread }, [
+      ...Array.from({ length: requests }, (_, i) => ({
+        id: `msg_r${i}`,
+        sender_display: "Unknown",
+        bucket: "requests",
+        read: false,
+      })),
+    ]);
+
+  test("AC-1: 未読 0 は 📭 だけ(件数を出さない)", () => {
+    const out = formatStatusline(brief(0, 0));
+    expect(out).toContain("📭");
+    expect(out).not.toContain("📬");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  test("AC-2: 未読 3 は 📬3", () => {
+    const out = formatStatusline(brief(3, 0));
+    expect(out).toContain("📬3");
+    expect(out).not.toContain("+");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  test("AC-3: requests は +N で別枠に足す", () => {
+    const out = formatStatusline(brief(5, 2));
+    expect(out).toContain("📬5");
+    expect(out).toContain("+2");
+  });
+
+  test("AC-X1: 本文も sender 名も handle も出さない", () => {
+    const withBody = buildBrief(whoami, [
+      { id: "msg_1", sender_display: "Shibu", bucket: "inbox", read: false, text: "秘密の本文" },
+    ]);
+    const out = formatStatusline(withBody);
+    for (const leak of ["秘密の本文", "Shibu", "aya", "Aya", "msg_1"]) {
+      expect(out).not.toContain(leak);
+    }
   });
 });

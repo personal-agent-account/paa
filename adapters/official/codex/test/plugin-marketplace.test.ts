@@ -50,8 +50,9 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
     expect(Object.keys(codex.mcp_servers)).toEqual(["paa"]);
     const claudeEntry = claude.mcpServers.paa!;
     const codexEntry = codex.mcp_servers.paa!;
-    expect(claudeEntry.command).toBe("bun");
-    expect(codexEntry.command).toBe("bun");
+    // PBI-0132: command は plugin dir 内の launcher(sh)。binary → bun の分岐を静的 JSON の外に置く
+    expect(claudeEntry.command).toBe("${CLAUDE_PLUGIN_ROOT}/paa-mcp");
+    expect(codexEntry.command).toBe("${PLUGIN_ROOT}/paa-mcp");
     // 各 file は自分の runtime の plugin root 変数だけを参照する(他方の変数の混入 = 破れ)。
     // 起動対象は bundle(PBI-0112: cache が plugin dir だけを copy する構造上 repo 参照 launcher は不可)
     expect(claudeEntry.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"]);
@@ -64,6 +65,9 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
     // args が参照する bundle が plugin 本体 dir に実在する(cache 内完結性の前提・図7)
     expect(existsSync(join(claudePluginDir, "mcp-server.bundle.js"))).toBe(true);
     expect(existsSync(join(codexPluginDir, "mcp-server.bundle.js"))).toBe(true);
+    // command が指す launcher も同じく plugin dir 内に在る(PBI-0132。cache 内完結性は command 側にも要る)
+    expect(existsSync(join(claudePluginDir, "paa-mcp"))).toBe(true);
+    expect(existsSync(join(codexPluginDir, "paa-mcp"))).toBe(true);
   });
 });
 

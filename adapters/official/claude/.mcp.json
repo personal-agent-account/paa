@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "paa": {
-      "command": "bun",
+      "command": "${CLAUDE_PLUGIN_ROOT}/paa-mcp",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"],
       "env": {
         "PAA_RUNTIME_KIND": "claude"

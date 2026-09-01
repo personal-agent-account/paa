@@ -22126,6 +22126,22 @@ var labelInputShape = {
   label: exports_external.enum(["action", "fyi", "discard"]).describe("action=\u8981\u5BFE\u5FDC / fyi=\u53C2\u8003 / discard=\u4E0D\u8981"),
   summary: exports_external.string().optional().describe("\u77ED\u3044\u8981\u7D04(140 \u5B57\u4EE5\u5185\u63A8\u5968)\u3002MCP \u304C device \u9375\u3067 seal \u3057\u3066\u304B\u3089\u9001\u308B")
 };
+var rulesPutInputShape = {
+  nl: exports_external.string().describe("owner \u306E\u8A00\u8449\u306E\u539F\u6587(\u4F8B: newsletter \u306F\u6BCE\u671D 9 \u6642\u306B\u307E\u3068\u3081\u3066)"),
+  scope: exports_external.object({
+    source_kind: exports_external.enum(["mail", "paa", "webhook", "android", "windows", "macos", "ios", "digest"]).optional(),
+    app_id: exports_external.string().optional().describe("\u767A\u751F\u6E90 app(\u4F8B: com.example.app)\u3002\u3053\u3053\u3067\u6307\u5B9A\u3057\u305F\u8A9E\u306F metadata \u3068\u3057\u3066\u5E73\u6587\u4FDD\u5B58\u3055\u308C\u308B"),
+    time_window: exports_external.string().optional(),
+    sender: exports_external.string().optional().describe("\u672C\u6587\u30FB\u9001\u4FE1\u8005\u306E\u8A9E\u3002\u6307\u5B9A\u3059\u308B\u3068 content rule \u306B\u306A\u308A server \u306B\u306F\u6697\u53F7\u5316\u3055\u308C\u3066\u4FDD\u5B58\u3055\u308C\u308B"),
+    keywords: exports_external.array(exports_external.string()).optional().describe("\u672C\u6587\u306E\u8A9E\u3002\u6307\u5B9A\u3059\u308B\u3068 content rule \u306B\u306A\u308B")
+  }).optional(),
+  action: exports_external.object({
+    type: exports_external.enum(["immediate", "digest", "discard", "cloud_visibility"]),
+    schedule: exports_external.string().optional().describe("digest \u7528\u300CHH:MM\u300D(\u4F8B: 09:00)"),
+    tz: exports_external.string().optional().describe("digest \u7528 IANA tz(\u4F8B: Asia/Tokyo\u3002\u65E2\u5B9A UTC)"),
+    visibility: exports_external.enum(["full", "masked", "local_only", "none"]).optional().describe("cloud_visibility \u7528")
+  })
+};
 
 // packages/mcp/src/tools.ts
 class PaaApiError extends Error {
@@ -22184,6 +22200,7 @@ function createAccountTools(config2) {
         body: { force, ...refs?.length ? { refs } : {}, ...content2 }
       });
     },
+    agents_list: () => call(config2, "/v1/agents"),
     contacts_list: () => call(config2, "/v1/contacts"),
     contacts_get: (contactId) => call(config2, `/v1/contacts/${contactId}`),
     mark_read: (messageId) => call(config2, `/v1/messages/${messageId}/read`, { body: {} }),
@@ -22201,6 +22218,32 @@ function createAccountTools(config2) {
         body.summary = { envelope: sealed.envelope };
       }
       return call(config2, `/v1/messages/${messageId}/label`, { body });
+    },
+    rules_put: (input) => call(config2, "/v1/rules", { body: input }),
+    rules_list: async () => {
+      const rules = await call(config2, "/v1/rules");
+      let own = null;
+      return Promise.all(rules.map(async (rule) => {
+        if (rule.content_scope?.envelope == null)
+          return rule;
+        own ??= await getOrCreateDeviceKey(deviceKindOf(config2));
+        try {
+          const bytes = await open2(rule.content_scope.envelope, own);
+          const plain = JSON.parse(new TextDecoder().decode(bytes));
+          const { content_scope, ...rest } = rule;
+          return {
+            ...rest,
+            nl: plain.nl,
+            scope: {
+              ...rest.scope,
+              ...plain.sender !== undefined ? { sender: plain.sender } : {},
+              ...plain.keywords !== undefined ? { keywords: plain.keywords } : {}
+            }
+          };
+        } catch {
+          return rule;
+        }
+      }));
     }
   };
 }
@@ -22242,9 +22285,12 @@ server.tool("reply", "\u81EA\u5206\u306E Account \u5185\u306E thread \u306B\u8FD
   ...input,
   text: input.text !== undefined ? restoreText(input.text, secrets) : undefined
 })));
+server.tool("agents_list", "\u3053\u306E Account \u304B\u3089\u8A71\u3057\u304B\u3051\u3089\u308C\u308B\u76F8\u624B\u306E\u4E00\u89A7\u3002runtimes = \u540C\u3058 Account \u306E runtime(name / kind / is_default / live = \u4ECA wake \u304C\u5C4A\u304F\u304B)\u3001contacts = \u5B9B\u5148(address \u306F send \u306E to \u306B\u305D\u306E\u307E\u307E\u6E21\u305B\u308B)\u3002\u76F8\u624B Account \u306E\u7A3C\u50CD\u72B6\u614B\u306F\u8FD4\u3055\u306A\u3044(\u8A2D\u8A08\u4E0A\u306E\u975E\u516C\u958B)", {}, async () => json(await tools.agents_list()));
 server.tool("contacts_list", "contacts \u4E00\u89A7", {}, async () => json(await tools.contacts_list()));
 server.tool("contacts_get", "contact 1 \u4EF6\u3092\u53D6\u5F97", { contact_id: exports_external.string() }, async ({ contact_id }) => json(await tools.contacts_get(contact_id)));
 server.tool("mark_read", "message \u3092\u65E2\u8AAD\u306B\u3059\u308B(\u3053\u306E runtime \u306E read state \u306E\u307F\u5909\u308F\u308B)", { message_id: exports_external.string() }, async ({ message_id }) => json(await tools.mark_read(message_id)));
 server.tool("approval_get", "\u81EA\u5206\u304C\u8D77\u3053\u3057\u305F approval(send/reply \u306E\u627F\u8A8D\u5F85\u3061)\u306E\u72B6\u614B\u3092\u53D6\u5F97\u3059\u308B\u3002pending/approved/rejected\u3002content \u306F\u542B\u307E\u306A\u3044", { approval_id: exports_external.string() }, async ({ approval_id }) => json(await tools.approval_get(approval_id)));
 server.tool("notification_label", "notification item \u306B triage label \u3092\u4ED8\u3051\u308B(action=\u8981\u5BFE\u5FDC / fyi=\u53C2\u8003 / discard=\u4E0D\u8981)\u3002summary \u306F device \u9375\u3067 seal \u3057\u3066\u9001\u308B", labelInputShape, async ({ message_id, label, summary }) => json(await tools.notification_label(message_id, label, summary)));
+server.tool("rules_put", "owner \u304C\u8A00\u8449\u3067\u983C\u3093\u3060\u634C\u304D\u65B9\u3092 rule \u3068\u3057\u3066\u4FDD\u5B58\u3059\u308B(nl = \u8A00\u8449\u306E\u539F\u6587\u30FBscope = \u5BFE\u8C61\u30FBaction = \u634C\u304D\u65B9)\u3002server \u304C\u6B63\u898F\u5316\u3057\u3066 layer(metadata / content)\u3092\u6C7A\u3081\u3001\u6B63\u898F\u5316\u6E08\u307F rule \u3092\u8FD4\u3059 \u2014\u2014 \u8FD4\u3063\u3066\u304D\u305F rule \u306E\u5185\u5BB9\u3092 owner \u306B 1 \u6587\u3067\u78BA\u8A8D(echo)\u3059\u308B\u3053\u3068\u3002\u540C\u3058 nl \u306E\u518D put \u306F\u4E0A\u66F8\u304D\u66F4\u65B0\u306B\u306A\u308B(rule \u306F\u5897\u3048\u306A\u3044)\u3002sender / keywords \u3092 scope \u306B\u5165\u308C\u308B\u3068 content rule \u306B\u306A\u308A server \u306B\u306F\u6697\u53F7\u5316\u3055\u308C\u3066\u4FDD\u5B58\u3055\u308C\u308B", rulesPutInputShape, async (input) => json(await tools.rules_put(input)));
+server.tool("rules_list", "\u4FDD\u5B58\u6E08\u307F rule \u306E\u4E00\u89A7\u3002content rule \u306E scope \u306F device \u9375\u3067\u5FA9\u5143\u3057\u3066\u8FD4\u3059", {}, async () => json(await tools.rules_list()));
 await server.connect(new StdioServerTransport);
