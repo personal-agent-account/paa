@@ -1,0 +1,20 @@
+[package]
+name = "paa-broker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22.1"
+# Detector Registry の署名検証(PBI-0022)。verify_strict のみ使う(鍵生成は Cloud 側)
+ed25519-dalek = "2.2.0"
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+hex = "0.4.3"
+http = "1.5.0"
+# 層 2 filesystem watch(要件 §45.3 / アーキ §39 で決定済み)。macOS は FSEvents backend のみ使う
+notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "time", "net", "sync", "io-util"] }
+tokio-tungstenite = { version = "0.30.0", features = ["connect", "handshake"] }
+# registry の取得(http のみ。WS と同じく TLS は broker 配布時にまとめて — PBI-0022 スコープ外)
+ureq = { version = "2.12.1", default-features = false }

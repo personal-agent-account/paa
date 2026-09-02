@@ -3,6 +3,8 @@ dist/
 # 単体実行ファイル(PBI-0137。1 本 66MB。配布は Release の仕事)
 adapters/official/*/bin/
 coverage/
+# broker(Rust)の build 成果物(PBI-0154。配布は Release の仕事。手元 cargo build の fallback 用)
+broker/target/
 
 .env*
 *.log

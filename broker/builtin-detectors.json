@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "issued_at": "2026-08-25T00:00:00Z",
+  "detectors": [
+    {
+      "id": "claude",
+      "display_name": "Claude Code",
+      "kind": "cli",
+      "detect": { "binaries": ["claude"], "apps": [] },
+      "version": { "args": ["--version"] },
+      "launch": { "new": [], "existing": ["--continue"] },
+      "capabilities": ["coding", "shell", "files"],
+      "adapter": "official/claude"
+    },
+    {
+      "id": "codex",
+      "display_name": "Codex",
+      "kind": "cli",
+      "detect": { "binaries": ["codex"], "apps": [] },
+      "version": { "args": ["--version"] },
+      "launch": { "new": [], "existing": ["resume", "--last"] },
+      "capabilities": ["coding", "shell", "files"],
+      "adapter": "official/codex"
+    }
+  ]
+}

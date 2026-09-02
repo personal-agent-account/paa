@@ -30,9 +30,24 @@ paper. See `adapters/official/claude` and `adapters/official/codex`. Gemini CLI 
 
 ## Quickstart
 
-Requires [Bun](https://bun.com) 1.2+.
+No JavaScript runtime, no Rust toolchain, no repo clone required — the CLI and the background
+broker it installs are both prebuilt binaries fetched from this repo's
+[Releases](https://github.com/personal-agent-account/paa/releases):
 
-Or skip the clone and install directly as a runtime plugin (inside Claude Code / Codex):
+```bash
+# macOS (Apple Silicon) → darwin-arm64 · macOS (Intel) → darwin-x64 · Linux (x64) → linux-x64
+TARGET="$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/')"
+curl -fsSL "https://github.com/personal-agent-account/paa/releases/latest/download/paa-$TARGET" -o paa
+chmod +x paa
+
+# connect this Mac to your account (fetches the broker binary, verifies its checksum, starts it)
+./paa login --url https://paa-cloud.onrender.com
+./paa pair claude      # attach Claude Code (same flow for codex / gemini)
+./paa status
+```
+
+Already inside Claude Code or Codex? Install the adapter as a runtime plugin instead —
+pairing (`paa login` / `paa pair` above) is still required afterward:
 
 ```bash
 # Claude Code:
@@ -41,24 +56,11 @@ claude plugin marketplace add personal-agent-account/paa
 codex plugin marketplace add personal-agent-account/paa
 ```
 
-> The plugin registers the MCP entry points; pairing your machine to your account
-> (`paa login` + `paa pair <runtime>` below) is still required.
-
-```bash
-git clone https://github.com/personal-agent-account/paa.git
-cd paa && bun install
-
-# connect this Mac to your account (installs a background broker)
-bun run paa login --url https://paa-cloud.onrender.com
-bun run paa pair claude      # attach Claude Code (same flow for codex / gemini)
-bun run paa status
-```
-
 ### Getting an account
 
-The Hosted Account Network is **invite-only** during the Public Alpha (Stage 1A):
-open an issue titled `invite` and include a way to reach you — you'll receive a
-server URL and an invite code, then run `paa login --url <server-url>` as above.
+Signup is open — create an account at **[https://paa.shibubu.ai](https://paa.shibubu.ai)**,
+then run `paa login --url https://paa-cloud.onrender.com` as above (or point `--url` at your
+own hosted instance).
 
 ## What's in this repository
 
@@ -78,6 +80,9 @@ adapters/official/
 apps/
   cli/                 `paa` command: pair a runtime, sync extensions, run diagnostics
 
+broker/                Rust device broker: wakes the paired runtime when a message arrives
+                        (background service `paa login` installs — see Quickstart)
+
 specs/
   runtime-adapter-contract.md   the boundary a new runtime integration implements
   e2ee-envelope-format.md       the wire format for encrypted messages
@@ -96,7 +101,8 @@ Network implementation is kept private:
 - Abuse/spam systems, operational/admin infrastructure
 
 Using the code in this repo (adapters, CLI, MCP server) requires a PAA Account server to
-talk to — during Stage 1A that's an invite-only hosted instance, not a public signup yet.
+talk to — during Stage 1A that's the hosted instance at **[https://paa.shibubu.ai](https://paa.shibubu.ai)**,
+open to signup.
 
 ## Why this split
 
@@ -114,5 +120,5 @@ Apache License 2.0 — see [LICENSE](./LICENSE).
 ## Status of this repository
 
 This is Stage 1A of a staged rollout: OSS code is public and under active development;
-the Hosted Account Network remains invite-gated while identity/recovery/device-security
+the Hosted Account Network is open for signup while identity/recovery/device-security
 guarantees are hardened. Expect breaking changes. Issues and discussion are welcome.
