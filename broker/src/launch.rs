@@ -15,63 +15,358 @@ const MAX_INSTRUCTION_BYTES: usize = 16 * 1024;
 /// dedicated session 起動時の 1 CLI あたりの最大 turn 数(コスト上限。実測 C: 3 turn で $0.31〜0.39)。
 const MAX_TURNS: &str = "40";
 
-/// AUTO の dedicated session(PBI-0019)の起動引数を runtime ごとに固定で組む。
+/// dedicated session に載せる MCP server 名(runtime 側の登録名。install.ts の `MCP_SERVER_NAME`)。
+const MCP_SERVER_NAME: &str = "paa";
+
+/// gemini の閉じ込め policy(PBI-0167)。**admin tier** に「paa MCP 以外は全部 deny」を置く。
+/// `toolName = "*"` + `mcpName = "paa"` は「その server の任意の tool」に一致する(bundle の
+/// `ruleMatches` 実測: mcpName で server を絞ってから toolName の `*` を素通しする)。
+/// 最終 priority = tier base(admin = 5)+ priority/1000 なので、deny(5.000)< allow(5.900)。
+/// workspace tier(`<cwd>/.gemini/policies`)は 0.46.0 時点で**機能しない**(docs の警告)ため、
+/// session_dir に置いた file を `--admin-policy` で明示的に読ませる。
+const GEMINI_POLICY_TOML: &str = r#"# paa broker が dedicated session ごとに置く閉じ込め policy(PBI-0167)。
+# 通知本文は攻撃者が書ける入力なので、組込み tool(run_shell_command / write_file / …)は
+# 一切通さず、paa MCP の tool だけを通す。
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 0
+
+[[rule]]
+toolName = "*"
+mcpName = "paa"
+decision = "allow"
+priority = 900
+"#;
+
+/// 閉じ込めの成否を決める外部の状態(path)。実環境の既定は `containment_env()`、test は値で差し替える。
+pub struct ContainmentEnv {
+    /// claude の user config(`$CLAUDE_CONFIG_DIR` か `$HOME` の `.claude.json`)。
+    /// paa MCP server の定義をここから読んで session_dir へ複製する。
+    pub claude_config: PathBuf,
+    /// claude の plugin 台帳(`<claude 設定 dir>/plugins/installed_plugins.json`)。
+    /// **配布戦略 §7.1 は plugin-first**(図10)で、plugin が持ち込む MCP server は
+    /// `.claude.json` の `mcpServers` には**書かれない**(実測 2026-09-02: 同じ機の
+    /// fakechat plugin の server が top-level に無い)。台帳の `installPath` から
+    /// plugin 同梱の `.mcp.json` を読んで複製元にする —— 無いと plugin で入れた人だけ
+    /// 全 dedicated session が containment_unavailable になり、AUTO が黙って止まる。
+    pub claude_plugin_registry: PathBuf,
+    /// codex の user config(`$CODEX_HOME` か `$HOME/.codex` の `config.toml`)。
+    /// codex には claude の `--strict-mcp-config` に相当する flag が無く、dedicated session でも
+    /// **user が設定した MCP server を全部載せる**(実測 2026-09-02: `codex mcp list` に playwright /
+    /// obsidian / unityMCP … が並ぶ)。MCP server は sandbox の外で動く別プロセスなので、
+    /// `--sandbox read-only` を掛けても攻撃者の本文から network 越しの書込み・持ち出しができる。
+    /// ここから server 名を読み、paa 以外を `-c mcp_servers.<name>.enabled=false` で落とす。
+    pub codex_config: PathBuf,
+    /// gemini の**標準** admin policy dir。ここに `.toml` が 1 つでも在ると、
+    /// `--admin-policy` で渡す supplemental policy は **丸ごと無視される**(gemini の
+    /// security guard: 中央 policy が既に在る所で flag 越しの上書きをさせない)。
+    /// = 閉じ込めが効かないので、その時は起こさない(fail-closed)。
+    pub gemini_admin_dirs: Vec<PathBuf>,
+}
+
+/// 実環境の `ContainmentEnv`。
+pub fn containment_env() -> ContainmentEnv {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let claude_home = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_else(|_| home.clone());
+    // plugin dir は CLAUDE_CONFIG_DIR 未設定時だけ `~/.claude/` の下(adapter の skillsDir と同じ規則)。
+    let plugin_root = match std::env::var("CLAUDE_CONFIG_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => PathBuf::from(&home).join(".claude"),
+    };
+    ContainmentEnv {
+        claude_config: PathBuf::from(claude_home).join(".claude.json"),
+        claude_plugin_registry: plugin_root.join("plugins").join("installed_plugins.json"),
+        codex_config: match std::env::var("CODEX_HOME") {
+            Ok(dir) => PathBuf::from(dir),
+            Err(_) => PathBuf::from(&home).join(".codex"),
+        }
+        .join("config.toml"),
+        gemini_admin_dirs: vec![
+            // macOS / Linux / Windows の標準 admin policy dir(gemini docs)。
+            // 3 つとも見るのは、broker が動く OS を argv 組み立ての条件にしないため
+            // (存在しない path は「.toml 無し」と同じ扱いになるだけ)。
+            PathBuf::from("/Library/Application Support/GeminiCli/policies"),
+            PathBuf::from("/etc/gemini-cli/policies"),
+            PathBuf::from(r"C:\ProgramData\gemini-cli\policies"),
+        ],
+    }
+}
+
+/// claude の paa MCP server の定義を抜き、`--mcp-config` に渡せる JSON にする。
+/// 探す順序は ① user config(`.claude.json` の `mcpServers.paa` = `paa install claude` 経路)
+/// → ② plugin 台帳(`installed_plugins.json` → `<installPath>/.mcp.json` = **plugin-first** 経路。
+/// 図10 / 配布戦略 §7.1)。どちらでも見つからなければ `containment_unavailable` —— **user settings を
+/// 落とすと MCP 登録ごと消える**(実測 2026-09-02: `--setting-sources project` で `paa` が tool 一覧から
+/// 消える)ので、定義を複製できないなら「閉じ込めたまま仕事ができる session」を作れない。
+/// 閉じ込めを緩めて起こす選択はしない(便利さより「mail 1 通で shell」を塞ぐ)。
 ///
-/// argv は実測 C(backlog/PBI-0019 G1 表)の通り。`instruction` は argv の 1 要素として渡す
-/// 前提 —— shell を経由させない(Cloud から届いた文字列を shell に解釈させると任意コマンド実行の
-/// 口になる)。`session_dir` は codex の `-o`(結果ファイル)にだけ使う。所有権のある `String` を
-/// 返すのは、`instruction`/`session_dir` が実行時に決まる可変長データで `&'static str` にできないため。
+/// ② を見るのは、plugin で入れた人の `.claude.json` に `mcpServers.paa` が**無い**ため
+/// (実測 2026-09-02: 同じ機で plugin 由来の fakechat server は top-level `mcpServers` に無く、
+/// `paa install claude` で入れた paa だけが在る)。① だけだと plugin-first の user は
+/// 全 dedicated session が fail-closed になり、AUTO が dispatch_skip の log 1 行だけ残して止まる。
+fn claude_mcp_config(config_path: &Path, plugin_registry: &Path) -> Result<String, String> {
+    let server = claude_user_mcp_server(config_path)
+        .or_else(|| claude_plugin_mcp_server(plugin_registry))
+        .ok_or_else(|| {
+            eprintln!(
+                "broker: paa MCP の定義が見つからない(user config {config_path:?} にも \
+                 plugin 台帳 {plugin_registry:?} にも)。閉じ込めたまま起こせないので起こさない"
+            );
+            "containment_unavailable".to_string()
+        })?;
+    Ok(serde_json::json!({ "mcpServers": { MCP_SERVER_NAME: server } }).to_string())
+}
+
+/// ①: `.claude.json`(`claude mcp add -s user` が書く場所)の `mcpServers.paa`。
+fn claude_user_mcp_server(config_path: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(config_path)
+        .map_err(|e| eprintln!("broker: claude config を読めない ({config_path:?}): {e}"))
+        .ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| eprintln!("broker: claude config が JSON として壊れている ({config_path:?}): {e}"))
+        .ok()?;
+    parsed.get("mcpServers")?.get(MCP_SERVER_NAME).cloned()
+}
+
+/// ②: plugin 台帳 → plugin 同梱の `.mcp.json` の `mcpServers.paa`。
+/// 台帳の key は `<plugin 名>@<marketplace 名>`、値は install ごとの配列(scope: user / local)。
+/// `${CLAUDE_PLUGIN_ROOT}` は claude が展開する変数なので、複製する時に **broker が実 path へ畳む**
+/// (`--mcp-config` で渡す JSON は plugin の文脈で読まれないため、展開されないまま渡すと command が
+/// 見つからず、閉じ込めただけで何も出来ない session になる)。
+fn claude_plugin_mcp_server(registry_path: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(registry_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| eprintln!("broker: claude plugin 台帳が壊れている ({registry_path:?}): {e}"))
+        .ok()?;
+    let plugins = parsed.get("plugins")?.as_object()?;
+    let mut candidates: Vec<&serde_json::Value> = plugins
+        .iter()
+        .filter(|(key, _)| key.split('@').next() == Some(MCP_SERVER_NAME))
+        .filter_map(|(_, installs)| installs.as_array())
+        .flatten()
+        .collect();
+    // scope:"user" を先に見る(local は「その project でだけ入れた」もの。dedicated session の
+    // cwd は session_dir なので、user scope の install の方が実態に近い)。
+    candidates.sort_by_key(|i| i.get("scope").and_then(|s| s.as_str()) != Some("user"));
+    for install in candidates {
+        let Some(root) = install.get("installPath").and_then(|p| p.as_str()) else { continue };
+        let Ok(text) = fs::read_to_string(Path::new(root).join(".mcp.json")) else { continue };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+        let Some(server) = parsed.get("mcpServers").and_then(|s| s.get(MCP_SERVER_NAME)) else {
+            continue;
+        };
+        return Some(expand_plugin_root(server, root));
+    }
+    None
+}
+
+/// JSON の文字列すべてで `${CLAUDE_PLUGIN_ROOT}` を実 path に置き換える(command / args / env 横断)。
+fn expand_plugin_root(value: &serde_json::Value, root: &str) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => {
+            serde_json::Value::String(s.replace("${CLAUDE_PLUGIN_ROOT}", root))
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(|v| expand_plugin_root(v, root)).collect())
+        }
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.iter().map(|(k, v)| (k.clone(), expand_plugin_root(v, root))).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// codex の config.toml から **paa 以外の MCP server 名**を拾う(PBI-0167 review 指摘)。
+/// codex には claude の `--strict-mcp-config` に相当する flag が無いので、`-c
+/// mcp_servers.<name>.enabled=false` を 1 つずつ積んで落とす(実測 2026-09-02, codex-cli 0.151.0:
+/// `codex mcp list --json -c 'mcp_servers.playwright.enabled=false'` で該当 server だけ
+/// `"enabled": false` になる)。**`codex mcp list` を broker から引く形は採らない** ——
+/// 実測 7.1 秒かかり、auth 状態を見るために server を実際に起こしてしまう(wake の度に
+/// user の playwright / obsidian が立ち上がる)。
 ///
-/// 実測 argv を持たない runtime は `None` —— registry で足しただけの新 runtime(PBI-0022)を
-/// instruction 無しで bare spawn してしまうと「AUTO で起こしたのに何も指示していない」session になる。
-pub fn dedicated_args(runtime: &str, instruction: &str, session_dir: &str) -> Option<Vec<String>> {
+/// 読めない config は「MCP server が 1 つも無い」ではなく **判定不能**として扱い、
+/// `[mcp_servers.<name>]` 以外の書き方(inline table `mcp_servers = {…}` / quoted key)が
+/// 現れたら名前を取り切れないので `containment_unavailable` で止める(fail-closed。
+/// 「落とし忘れた server が 1 つ」は静かな全開放になるため、曖昧なら起こさない)。
+fn codex_disabled_mcp_servers(config_path: &Path) -> Result<Vec<String>, String> {
+    let Ok(text) = fs::read_to_string(config_path) else {
+        // config.toml が無い = MCP server の設定も無い(paa は plugin 側から来る)。落とす相手が居ない。
+        return Ok(vec![]);
+    };
+    let mut names: Vec<String> = vec![];
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let header = line.strip_prefix('[').and_then(|l| l.split(']').next());
+        if let Some(header) = header {
+            let header = header.trim_start_matches('[');
+            let mut parts = header.split('.');
+            if parts.next().map(str::trim) != Some("mcp_servers") {
+                continue;
+            }
+            let Some(name) = parts.next().map(str::trim) else {
+                eprintln!("broker: codex config の [mcp_servers] を server 名まで読めない ({config_path:?})");
+                return Err("containment_unavailable".to_string());
+            };
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                // quoted key(`["mcp_servers"."x y"]`)等。`-c` の key に安全に埋められない
+                // = 落とし切れないので起こさない。
+                eprintln!("broker: codex config の MCP server 名が想定外 ({name:?} in {config_path:?})");
+                return Err("containment_unavailable".to_string());
+            }
+            if name != MCP_SERVER_NAME && !names.iter().any(|n| n == name) {
+                names.push(name.to_string());
+            }
+            continue;
+        }
+        if line.starts_with("mcp_servers") {
+            // inline table(`mcp_servers = { github = { … } }`)は行単位では名前を取り切れない。
+            eprintln!("broker: codex config の mcp_servers が inline table ({config_path:?})。落とし切れないので起こさない");
+            return Err("containment_unavailable".to_string());
+        }
+    }
+    Ok(names)
+}
+
+/// dir に `.toml` が 1 つでも在るか(gemini の標準 admin policy の有無)。
+fn has_toml(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else { return false };
+    entries.flatten().any(|e| {
+        e.path()
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("toml"))
+            .unwrap_or(false)
+    })
+}
+
+/// AUTO / triage / draft / owner の dedicated session(PBI-0019 / PBI-0117)の起動引数と、
+/// session_dir に置く**閉じ込め用の file** を runtime ごとに固定で組む(PBI-0167)。
+///
+/// argv は実測(PBI-0019 の実測 C / PBI-0061 の実測 D / PBI-0167 の実測 E)の通り。`instruction` は
+/// argv の 1 要素として渡す前提 —— shell を経由させない(Cloud から届いた文字列を shell に解釈させると
+/// 任意コマンド実行の口になる)。`session_dir` は codex の `-o`(結果ファイル)と、閉じ込め file の置き場に使う。
+///
+/// **閉じ込め(PBI-0167)**: dedicated session の入力(通知本文)は攻撃者が書ける。3 runtime とも
+/// 「組込み tool は通さず paa MCP だけ通す」に揃える —— 揃っていないと「gemini を既定にしている人
+/// だけ mail 1 通で shell を握られる」という、user から見えない差になる。
+///
+/// 返り値は (argv, session_dir に置く file の (相対 path, 中身))。実測 argv を持たない runtime は
+/// `dedicated_unsupported` —— registry で足しただけの新 runtime(PBI-0022)を instruction 無しで
+/// bare spawn してしまうと「AUTO で起こしたのに何も指示していない」session になる。
+/// 閉じ込めが組めない環境は `containment_unavailable`(fail-closed。起こさない)。
+pub fn dedicated_launch(
+    runtime: &str,
+    instruction: &str,
+    session_dir: &str,
+    env: &ContainmentEnv,
+) -> Result<(Vec<String>, Vec<(String, String)>), String> {
+    let argv = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
     match runtime {
-        // 実測 C: claude -p <instruction> --permission-mode dontAsk --allowedTools mcp__paa
-        //         --output-format json --max-turns 40
-        "claude" => Some(vec![
-            "-p".to_string(),
-            instruction.to_string(),
-            "--permission-mode".to_string(),
-            "dontAsk".to_string(),
-            "--allowedTools".to_string(),
-            "mcp__paa".to_string(),
-            "--output-format".to_string(),
-            "json".to_string(),
-            "--max-turns".to_string(),
-            MAX_TURNS.to_string(),
-        ]),
-        // codex exec --skip-git-repo-check -C <dir> -o <dir>/result.txt <instruction>
-        "codex" => Some(vec![
-            "exec".to_string(),
-            "--skip-git-repo-check".to_string(),
-            "-C".to_string(),
-            session_dir.to_string(),
-            "-o".to_string(),
-            format!("{session_dir}/result.txt"),
-            instruction.to_string(),
-        ]),
-        // 実測 D(2026-08-28, gemini-cli 0.46.0。PBI-0061 / W9c):
+        // 実測 C(PBI-0019)+ 実測 E(PBI-0167, 2026-09-02, Claude Code 2.1.258):
+        //   claude -p <instruction> --tools "" --setting-sources project --strict-mcp-config
+        //          --mcp-config <dir>/paa-mcp.json --permission-mode dontAsk --allowedTools mcp__paa
+        //          --output-format json --max-turns 40
+        //
+        // `--allowedTools mcp__paa` **だけでは Bash が通る**(実測 E: `--permission-mode dontAsk` は
+        // 「聞かずに実行する」であって allow list ではない。user の `~/.claude/settings.json` に
+        // `allow: ["Bash"]` が有ろうと無かろうと Bash は動いた)。組込み tool を落とすのは
+        // `--tools ""`(= 組込みを 1 つも積まない。MCP tool は別枠なので paa は残る — 実測 E)。
+        //
+        // `--tools` / `--mcp-config` / `--allowedTools` は可変長引数なので、**直後には必ず別の flag を置く**
+        // (positional が続くと flag が食う —— 実測 E で `--mcp-config <path> mcp list` が
+        // "MCP config file not found: .../mcp" に化けた)。
+        "claude" => {
+            let mcp_config = claude_mcp_config(&env.claude_config, &env.claude_plugin_registry)?;
+            let rel = "paa-mcp.json";
+            Ok((
+                argv(&[
+                    "-p",
+                    instruction,
+                    "--tools",
+                    "",
+                    "--setting-sources",
+                    "project",
+                    "--strict-mcp-config",
+                    "--mcp-config",
+                    &format!("{session_dir}/{rel}"),
+                    "--permission-mode",
+                    "dontAsk",
+                    "--allowedTools",
+                    "mcp__paa",
+                    "--output-format",
+                    "json",
+                    "--max-turns",
+                    MAX_TURNS,
+                ]),
+                vec![(rel.to_string(), mcp_config)],
+            ))
+        }
+        // codex exec --skip-git-repo-check --sandbox read-only -C <dir> -o <dir>/result.txt <instruction>
+        //
+        // `--sandbox read-only` は**明示する**(PBI-0167 AC-3)—— 既定も read-only だが、既定は
+        // `~/.codex/config.toml` の `sandbox_mode` で user が上書きできる。攻撃者が書いた本文を
+        // 読ませる session の権限を、user の設定 file 任せにしない。
+        "codex" => {
+            let mut args = argv(&["exec", "--skip-git-repo-check", "--sandbox", "read-only"]);
+            // paa 以外の MCP server を 1 つずつ落とす(review 指摘: `--sandbox read-only` は
+            // MCP server に掛からない —— server は sandbox の外の別プロセスなので、
+            // 攻撃者の本文から playwright / obsidian 越しに network も書込みも届く)。
+            for name in codex_disabled_mcp_servers(&env.codex_config)? {
+                args.push("-c".to_string());
+                args.push(format!("mcp_servers.{name}.enabled=false"));
+            }
+            args.extend(argv(&[
+                "-C",
+                session_dir,
+                "-o",
+                &format!("{session_dir}/result.txt"),
+                instruction,
+            ]));
+            Ok((args, vec![]))
+        }
+        // 実測 D(2026-08-28, gemini-cli 0.46.0。PBI-0061 / W9c)+ 実測 E(PBI-0167):
         //   gemini -p <instruction> --approval-mode yolo --skip-trust
-        //          --allowed-mcp-server-names paa -o json
+        //          --allowed-mcp-server-names paa --admin-policy <dir>/policies -o json
+        //
         // `--skip-trust` は**必須** —— session_dir は必ず「信頼していないフォルダ」なので、
         // 無いと `Approval mode overridden to "default" because the current folder is not
         // trusted.` に落ちて tool 呼び出しが承認待ちで固まる(実測)。
-        // `--allowed-tools` は DEPRECATED なので `--allowed-mcp-server-names` で PAA の
-        // MCP server だけに絞る(claude の `--allowedTools mcp__paa` に相当)。
+        // `--allowed-mcp-server-names` は **MCP の絞りでしかない**(組込み tool は素通し)。
+        // `--approval-mode yolo` は全 tool を自動承認するので、実測 E では
+        // 「`run_shell_command` で date を実行しろ」の 1 文で **実際に shell が動いた**
+        // (policy 無し: totalCalls 1 / policy 有り: totalCalls 0)。塞ぐのは policy engine。
         // claude の `--max-turns` に相当する flag は gemini に**無い**(help 実測) ——
         // 暴走の抑えは tool 制限と session timeout に委ねる。
-        "gemini" => Some(vec![
-            "-p".to_string(),
-            instruction.to_string(),
-            "--approval-mode".to_string(),
-            "yolo".to_string(),
-            "--skip-trust".to_string(),
-            "--allowed-mcp-server-names".to_string(),
-            "paa".to_string(),
-            "-o".to_string(),
-            "json".to_string(),
-        ]),
-        _ => None,
+        "gemini" => {
+            if let Some(dir) = env.gemini_admin_dirs.iter().find(|d| has_toml(d)) {
+                eprintln!(
+                    "broker: gemini の標準 admin policy dir に .toml が在る ({dir:?}) ため \
+                     --admin-policy が無視される。閉じ込められないので起こさない"
+                );
+                return Err("containment_unavailable".to_string());
+            }
+            let rel = "policies/paa-containment.toml";
+            Ok((
+                argv(&[
+                    "-p",
+                    instruction,
+                    "--approval-mode",
+                    "yolo",
+                    "--skip-trust",
+                    "--allowed-mcp-server-names",
+                    "paa",
+                    "--admin-policy",
+                    &format!("{session_dir}/policies"),
+                    "-o",
+                    "json",
+                ]),
+                vec![(rel.to_string(), GEMINI_POLICY_TOML.to_string())],
+            ))
+        }
+        _ => Err("dedicated_unsupported".to_string()),
     }
 }
 
@@ -121,7 +416,7 @@ fn check_launchable(registry: &Registry, runtime: &str) -> Result<(), String> {
 /// allowlist ごと差し替えられるよう、実 spawn を伴う検証を本物の CLI 名から分離する。
 ///
 /// `program` は `resolve_program` が返した path か bare name。`args` は `session_args`/
-/// `dedicated_args` が組んだものだけを渡す前提(Cloud から届いた文字列を allowlist 検査なしに引数へ
+/// `dedicated_launch` が組んだものだけを渡す前提(Cloud から届いた文字列を allowlist 検査なしに引数へ
 /// 混ぜない)。`session_dir` を渡すと (a) 子プロセスの **cwd をそこに固定** し、(b) stdout/stderr を
 /// その配下のファイルへ向ける(dedicated session。None なら両方とも broker から継承)。
 ///
@@ -286,10 +581,11 @@ pub fn launch_session_scoped(
         instruction,
         request_id,
         scope,
+        &containment_env(),
     )
 }
 
-/// `launch_session_scoped` の本体。broker home を引数で受けるのはテストのため —— `env::set_var` で
+/// `launch_session_scoped` の本体。broker home と `ContainmentEnv` を引数で受けるのはテストのため —— `env::set_var` で
 /// `PAA_BROKER_HOME` を差し替える方式は、並列に走る他テストの spawn 中の子プロセスの環境を壊す
 /// (実測: version probe の子 `sh` が落ちて出力が空になる)。
 pub fn launch_session_scoped_in(
@@ -300,6 +596,7 @@ pub fn launch_session_scoped_in(
     instruction: &str,
     request_id: &str,
     scope: Option<&str>,
+    env: &ContainmentEnv,
 ) -> Result<Child, String> {
     if !is_safe_request_id(request_id) {
         return Err("invalid_request_id".to_string());
@@ -318,7 +615,22 @@ pub fn launch_session_scoped_in(
         "session_dir_failed".to_string()
     })?;
     check_launchable(registry, runtime)?;
-    let args = dedicated_args(runtime, instruction, &dir_str).ok_or_else(|| "dedicated_unsupported".to_string())?;
+    let (args, files) = dedicated_launch(runtime, instruction, &dir_str, env)?;
+    // 閉じ込め用の file(claude の `--mcp-config` / gemini の admin policy)を session_dir に置く。
+    // spawn より **前** に全部書く —— 置けなかった runtime を「flag だけ付いた丸腰」で起こさない。
+    for (rel, content) in &files {
+        let path = session_dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                eprintln!("broker: 閉じ込め file の dir 作成失敗 ({parent:?}): {e}");
+                "session_dir_failed".to_string()
+            })?;
+        }
+        fs::write(&path, content).map_err(|e| {
+            eprintln!("broker: 閉じ込め file の書込失敗 ({path:?}): {e}");
+            "session_dir_failed".to_string()
+        })?;
+    }
     let program = resolve_program(found, runtime);
     launch_with_scope(runtime, &program, &args, &registry.allowlist(), Some(&dir_str), scope)
 }
@@ -486,16 +798,55 @@ mod tests {
         assert_eq!(resolve_program(&found, "claude"), "claude");
     }
 
-    // PBI-0019 AC-1/AC-2: dedicated session の argv が実測 C の通りに組まれること。
+    // PBI-0019 AC-1/AC-2 + PBI-0167 AC-1〜AC-4: dedicated session の argv が実測どおりに組まれ、
+    // 3 runtime とも閉じ込め(組込み tool を通さない)が argv / file として載ること。
+
+    /// paa MCP が登録済みの claude user config と、admin policy の無い gemini を模した env。
+    fn test_env() -> ContainmentEnv {
+        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let config = dir.join(".claude.json");
+        fs::write(
+            &config,
+            r#"{"mcpServers":{"paa":{"type":"stdio","command":"bun","args":["/x/server.ts"],
+               "env":{"PAA_RUNTIME_KIND":"claude","PAA_URL":"http://localhost:8787"}},
+               "other":{"command":"other"}}}"#,
+        )
+        .unwrap();
+        // codex は user の MCP server を全部載せる(--strict-mcp-config が無い)ので、
+        // paa 以外は `-c ….enabled=false` で落とす —— 実機の config.toml と同じ形で置く。
+        let codex_config = dir.join("codex-config.toml");
+        fs::write(
+            &codex_config,
+            "model = \"gpt-5\"\n\n[mcp_servers.playwright]\ncommand = \"npx\"\n\n\
+             [mcp_servers.playwright.tools.browser_click]\nenabled = true\n\n\
+             # [mcp_servers.commented-out]\n\
+             [mcp_servers.paa]\ncommand = \"bun\"\n\n[mcp_servers.obsidian]\ncommand = \"uvx\"\n",
+        )
+        .unwrap();
+        ContainmentEnv {
+            claude_config: config,
+            claude_plugin_registry: dir.join("no-such-plugins.json"),
+            codex_config,
+            gemini_admin_dirs: vec![dir.join("no-such-admin-policies")],
+        }
+    }
 
     #[test]
-    fn dedicated_args_claude_matches_measured_argv() {
-        let args = dedicated_args("claude", "INSTR", "/tmp/sess").unwrap();
+    fn dedicated_launch_claude_matches_measured_argv() {
+        let (args, files) = dedicated_launch("claude", "INSTR", "/tmp/sess", &test_env()).unwrap();
         assert_eq!(
             args,
             vec![
                 "-p",
                 "INSTR",
+                "--tools",
+                "",
+                "--setting-sources",
+                "project",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "/tmp/sess/paa-mcp.json",
                 "--permission-mode",
                 "dontAsk",
                 "--allowedTools",
@@ -506,16 +857,146 @@ mod tests {
                 "40",
             ]
         );
+        // AC-2: 組込み tool を 1 つも積まない(`--allowedTools` は allow list ではないので
+        // これが落ちると user の settings.json の有無に関わらず Bash が通る — 実測 E)
+        let tools = args.iter().position(|a| a == "--tools").expect("--tools が無い");
+        assert_eq!(args[tools + 1], "", "--tools が空文字でない = 組込み tool が積まれる");
+        // AC-2: user / local の settings.json(allow 規則と hooks)を読ませない
+        let sources = args.iter().position(|a| a == "--setting-sources").unwrap();
+        assert_eq!(args[sources + 1], "project");
+        // 可変長引数の直後は必ず別の flag(positional が続くと flag が食う — 実測 E)
+        for flag in ["--tools", "--mcp-config", "--allowedTools"] {
+            let i = args.iter().position(|a| a == flag).unwrap();
+            assert!(
+                args.get(i + 2).map(|a| a.starts_with('-')).unwrap_or(false),
+                "{flag} の値の後ろが flag でない: {args:?}"
+            );
+        }
+        // user settings を落とすと MCP 登録ごと消えるので、paa の定義を session_dir に複製する
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "paa-mcp.json");
+        let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+        assert_eq!(cfg["mcpServers"]["paa"]["command"], "bun");
+        assert!(cfg["mcpServers"].get("other").is_none(), "paa 以外の MCP まで持ち込まない");
     }
 
+    // AC-4(claude 側): paa MCP の定義を複製できない環境では起こさない。閉じ込めを緩めて
+    // 起こす(user settings を読ませる)選択はしない。
     #[test]
-    fn dedicated_args_codex_matches_measured_argv() {
-        let args = dedicated_args("codex", "INSTR", "/tmp/sess").unwrap();
+    fn dedicated_launch_claude_without_paa_mcp_is_containment_unavailable() {
+        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-none-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let no_plugin = dir.join("no-such-plugins.json");
+        let missing = ContainmentEnv {
+            claude_config: dir.join("absent.json"),
+            claude_plugin_registry: no_plugin.clone(),
+            codex_config: dir.join("no-such-codex.toml"),
+            gemini_admin_dirs: vec![],
+        };
+        assert_eq!(
+            dedicated_launch("claude", "I", "/tmp/s", &missing).err(),
+            Some("containment_unavailable".to_string())
+        );
+        let broken = dir.join("broken.json");
+        fs::write(&broken, "{ not json").unwrap();
+        assert_eq!(
+            dedicated_launch("claude", "I", "/tmp/s", &ContainmentEnv { claude_config: broken, claude_plugin_registry: no_plugin.clone(), codex_config: dir.join("no-such-codex.toml"), gemini_admin_dirs: vec![] }).err(),
+            Some("containment_unavailable".to_string())
+        );
+        let no_paa = dir.join("no-paa.json");
+        fs::write(&no_paa, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
+        assert_eq!(
+            dedicated_launch("claude", "I", "/tmp/s", &ContainmentEnv { claude_config: no_paa, claude_plugin_registry: no_plugin.clone(), codex_config: dir.join("no-such-codex.toml"), gemini_admin_dirs: vec![] }).err(),
+            Some("containment_unavailable".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // review 指摘(順95): **plugin-first**(配布戦略 §7.1・図10)で入れた claude は
+    // `.claude.json` の `mcpServers` に paa を持たない —— ① だけを見ていた実装では、
+    // plugin で入れた user の全 dedicated session が containment_unavailable になり、
+    // AUTO が dispatch_skip の log 1 行だけ残して黙って止まっていた。
+    // ② plugin 台帳 → `<installPath>/.mcp.json` を複製元にし、`${CLAUDE_PLUGIN_ROOT}` を畳む。
+    #[test]
+    fn dedicated_launch_claude_falls_back_to_plugin_mcp_config() {
+        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-plugin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        // local scope の install は壊れた plugin dir を指す(user scope が先に選ばれることの確認)
+        let local_root = dir.join("cache/paa/local");
+        let user_root = dir.join("cache/paa/0.1.0");
+        fs::create_dir_all(&user_root).unwrap();
+        fs::write(
+            user_root.join(".mcp.json"),
+            r#"{"mcpServers":{"paa":{"command":"${CLAUDE_PLUGIN_ROOT}/paa-mcp",
+               "args":["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"],
+               "env":{"PAA_RUNTIME_KIND":"claude"}}}}"#,
+        )
+        .unwrap();
+        let registry = dir.join("installed_plugins.json");
+        fs::write(
+            &registry,
+            format!(
+                r#"{{"version":2,"plugins":{{
+                   "other@mkt":[{{"scope":"user","installPath":"{other}"}}],
+                   "paa@paa-marketplace":[
+                     {{"scope":"local","installPath":"{local}"}},
+                     {{"scope":"user","installPath":"{user}"}}]}}}}"#,
+                other = dir.join("cache/other").display(),
+                local = local_root.display(),
+                user = user_root.display(),
+            ),
+        )
+        .unwrap();
+        let env = ContainmentEnv {
+            // user config は「有るが paa は未登録」= plugin で入れた人の実態
+            claude_config: {
+                let c = dir.join(".claude.json");
+                fs::write(&c, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
+                c
+            },
+            claude_plugin_registry: registry,
+            codex_config: dir.join("no-such-codex.toml"),
+            gemini_admin_dirs: vec![],
+        };
+        let (_, files) = dedicated_launch("claude", "I", "/tmp/sess", &env).expect("起こせること");
+        let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+        let root = user_root.display().to_string();
+        assert_eq!(cfg["mcpServers"]["paa"]["command"], format!("{root}/paa-mcp"));
+        assert_eq!(cfg["mcpServers"]["paa"]["args"][0], format!("{root}/mcp-server.bundle.js"));
+        assert_eq!(cfg["mcpServers"]["paa"]["env"]["PAA_RUNTIME_KIND"], "claude");
+        assert!(
+            !files[0].1.contains("CLAUDE_PLUGIN_ROOT"),
+            "変数が畳まれずに残ると command が見つからず、閉じ込めただけの丸腰 session になる: {}",
+            files[0].1
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ① が有る時は ① を使う(plugin 台帳より user 登録が優先。`paa install claude` した人の実態)。
+    #[test]
+    fn dedicated_launch_claude_prefers_user_config_over_plugin() {
+        let (_, files) = dedicated_launch("claude", "I", "/tmp/sess", &test_env()).unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+        assert_eq!(cfg["mcpServers"]["paa"]["command"], "bun");
+    }
+
+    // AC-3: codex は既定に頼らず `--sandbox read-only` を明示する(既定は user の
+    // ~/.codex/config.toml で上書きできる)。
+    #[test]
+    fn dedicated_launch_codex_matches_measured_argv() {
+        let (args, files) = dedicated_launch("codex", "INSTR", "/tmp/sess", &test_env()).unwrap();
         assert_eq!(
             args,
             vec![
                 "exec",
                 "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                // review 指摘: paa 以外の MCP server は sandbox の外で動くので明示的に落とす
+                "-c",
+                "mcp_servers.playwright.enabled=false",
+                "-c",
+                "mcp_servers.obsidian.enabled=false",
                 "-C",
                 "/tmp/sess",
                 "-o",
@@ -523,14 +1004,63 @@ mod tests {
                 "INSTR",
             ]
         );
+        assert!(files.is_empty());
+        let sandbox = args.iter().position(|a| a == "--sandbox").expect("--sandbox が無い");
+        assert_eq!(args[sandbox + 1], "read-only");
+        // paa 自身は落とさない(落とすと閉じ込めただけで何も出来ない session になる)
+        assert!(!args.iter().any(|a| a == "mcp_servers.paa.enabled=false"));
+        // instruction は最後(可変長の `-c` の直後に positional を置かない)
+        assert_eq!(args.last().unwrap(), "INSTR");
+    }
+
+    // review 指摘(順95): codex の MCP は `--sandbox read-only` の外(別プロセス)なので、
+    // 名前を取り切れない config は「server 無し」ではなく **判定不能**として起こさない。
+    #[test]
+    fn dedicated_launch_codex_with_unreadable_mcp_names_is_containment_unavailable() {
+        let dir = std::env::temp_dir().join(format!("paa-broker-codex-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let env_with = |file: &str, body: &str| {
+            let path = dir.join(file);
+            fs::write(&path, body).unwrap();
+            ContainmentEnv {
+                claude_config: dir.join("no.json"),
+                claude_plugin_registry: dir.join("no-plugins.json"),
+                codex_config: path,
+                gemini_admin_dirs: vec![],
+            }
+        };
+        // inline table: 行単位では名前を取り切れない
+        let inline = env_with("inline.toml", "mcp_servers = { github = { command = \"x\" } }\n");
+        assert_eq!(
+            dedicated_launch("codex", "I", "/tmp/s", &inline).err(),
+            Some("containment_unavailable".to_string())
+        );
+        // quoted key: `-c` の key に埋められない
+        let quoted = env_with("quoted.toml", "[mcp_servers.\"we ird\"]\ncommand = \"x\"\n");
+        assert_eq!(
+            dedicated_launch("codex", "I", "/tmp/s", &quoted).err(),
+            Some("containment_unavailable".to_string())
+        );
+        // config.toml 自体が無い = 落とす相手が居ない(paa は plugin 側から来る)。起こしてよい
+        let none = ContainmentEnv {
+            claude_config: dir.join("no.json"),
+            claude_plugin_registry: dir.join("no-plugins.json"),
+            codex_config: dir.join("absent.toml"),
+            gemini_admin_dirs: vec![],
+        };
+        let (args, _) = dedicated_launch("codex", "I", "/tmp/s", &none).unwrap();
+        assert!(!args.iter().any(|a| a == "-c"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     // PBI-0061 / W9c: 2026-08-28 に gemini-cli 0.46.0 を実際に叩いて確かめた argv。
     // `--skip-trust` が落ちると untrusted folder 判定で承認モードが default に戻り、
     // AUTO の session が tool 呼び出しの承認待ちで固まる(実測した失敗)。
+    // PBI-0167 AC-1: `--approval-mode yolo` は組込み tool も自動承認するので、
+    // admin tier の deny policy が唯一の壁になる(実測 E: policy 無しで shell が動いた)。
     #[test]
-    fn dedicated_args_gemini_matches_measured_argv() {
-        let args = dedicated_args("gemini", "INSTR", "/tmp/sess").unwrap();
+    fn dedicated_launch_gemini_matches_measured_argv() {
+        let (args, files) = dedicated_launch("gemini", "INSTR", "/tmp/sess", &test_env()).unwrap();
         assert_eq!(
             args,
             vec![
@@ -541,25 +1071,64 @@ mod tests {
                 "--skip-trust",
                 "--allowed-mcp-server-names",
                 "paa",
+                "--admin-policy",
+                "/tmp/sess/policies",
                 "-o",
                 "json",
             ]
         );
         // 承認待ちで固まらないための必須 flag(単独でも守る)
         assert!(args.iter().any(|a| a == "--skip-trust"));
+        // policy は session_dir に置く(workspace tier は 0.46.0 では機能しない)
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "policies/paa-containment.toml");
+        assert!(files[0].1.contains("decision = \"deny\""), "{}", files[0].1);
+        assert!(files[0].1.contains("mcpName = \"paa\""), "{}", files[0].1);
+    }
+
+    // AC-4(gemini 側): 標準 admin policy dir に .toml が在ると --admin-policy は無視される
+    // (gemini の security guard)= 閉じ込められないので起こさない。
+    #[test]
+    fn dedicated_launch_gemini_with_system_policy_is_containment_unavailable() {
+        let dir = std::env::temp_dir().join(format!("paa-broker-admin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("corp.toml"), "").unwrap();
+        let env = ContainmentEnv {
+            claude_config: dir.join(".claude.json"),
+            claude_plugin_registry: dir.join("no-such-plugins.json"),
+            codex_config: dir.join("no-such-codex.toml"),
+            gemini_admin_dirs: vec![dir.clone()],
+        };
+        assert_eq!(
+            dedicated_launch("gemini", "I", "/tmp/s", &env).err(),
+            Some("containment_unavailable".to_string())
+        );
+        // .toml 以外しか無い dir は素通し(閉じ込めは効く)
+        fs::remove_file(dir.join("corp.toml")).unwrap();
+        fs::write(dir.join("README.md"), "").unwrap();
+        assert!(dedicated_launch("gemini", "I", "/tmp/s", &env).is_ok());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn dedicated_args_unknown_runtime_is_none() {
-        assert!(dedicated_args("hermes", "INSTR", "/tmp/sess").is_none());
-        assert!(dedicated_args("superagent", "INSTR", "/tmp/sess").is_none());
+    fn dedicated_launch_unknown_runtime_is_unsupported() {
+        let env = test_env();
+        assert_eq!(
+            dedicated_launch("hermes", "INSTR", "/tmp/sess", &env).err(),
+            Some("dedicated_unsupported".to_string())
+        );
+        assert_eq!(
+            dedicated_launch("superagent", "INSTR", "/tmp/sess", &env).err(),
+            Some("dedicated_unsupported".to_string())
+        );
     }
 
     // registry で足した runtime を AUTO で起こそうとしても bare spawn にはならない(dedicated_unsupported)
     #[test]
     fn launch_session_refuses_runtime_without_dedicated_argv() {
         let tmp = std::env::temp_dir().join(format!("paa-broker-ded-{}", std::process::id()));
-        let result = launch_session_scoped_in(&tmp, &reg_with_ollama(), &[], "superagent", "instr", "req-ded", None);
+        let result = launch_session_scoped_in(&tmp, &reg_with_ollama(), &[], "superagent", "instr", "req-ded", None, &test_env());
         assert_eq!(result.err(), Some("dedicated_unsupported".to_string()));
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -585,7 +1154,7 @@ mod tests {
         // request_id を安全な値にし、broker home を temp に向ける(env は触らない)
         let tmp = std::env::temp_dir().join(format!("paa-broker-limit-{}", std::process::id()));
         let result =
-            launch_session_scoped_in(&tmp, &registry::builtin(), &[], "not-a-real-runtime", &at_limit, "req-limit", None);
+            launch_session_scoped_in(&tmp, &registry::builtin(), &[], "not-a-real-runtime", &at_limit, "req-limit", None, &test_env());
         // instruction_too_long ではないこと(registry で弾かれるのが正しい)
         assert_eq!(result.err(), Some("unknown_runtime".to_string()));
         let _ = fs::remove_dir_all(&tmp);
@@ -622,7 +1191,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("paa-broker-instr-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         let result =
-            launch_session_scoped_in(&home, &registry::builtin(), &[], "not-a-real-runtime", "INSTR", "req-ok", None);
+            launch_session_scoped_in(&home, &registry::builtin(), &[], "not-a-real-runtime", "INSTR", "req-ok", None, &test_env());
         assert_eq!(result.err(), Some("unknown_runtime".to_string()));
         assert_eq!(
             fs::read_to_string(home.join("sessions").join("req-ok").join("instruction.txt")).unwrap(),
@@ -636,7 +1205,7 @@ mod tests {
         let tmp_file = std::env::temp_dir().join(format!("paa-broker-file-{}", std::process::id()));
         fs::write(&tmp_file, "not a dir").unwrap();
         let result =
-            launch_session_scoped_in(&tmp_file, &registry::builtin(), &[], "not-a-real-runtime", "instr", "req-dir", None);
+            launch_session_scoped_in(&tmp_file, &registry::builtin(), &[], "not-a-real-runtime", "instr", "req-dir", None, &test_env());
         // AC-11: reason は bare token 'session_dir_failed'(詳細は付けない)。
         assert_eq!(result.err(), Some("session_dir_failed".to_string()));
         let _ = fs::remove_file(&tmp_file);
