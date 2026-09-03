@@ -20,7 +20,7 @@ async function put(path: string, mode: number): Promise<string> {
 }
 
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "paa-mcpcmd-"));
+  home = await mkdtemp(join(tmpdir(), "atn-mcpcmd-"));
   bin = join(home, "bin");
   await mkdir(bin, { recursive: true });
 });
@@ -38,8 +38,8 @@ describe("resolveMcpServerCommand (PBI-0132)", () => {
     });
   });
 
-  test("AC-2: PAA_MCP_BINARY 無しなら <PAA_HOME>/bin/paa-mcp", async () => {
-    const installed = await put(join(bin, "paa-mcp"), 0o755);
+  test("AC-2: PAA_MCP_BINARY 無しなら <PAA_HOME>/bin/atn-mcp", async () => {
+    const installed = await put(join(bin, "atn-mcp"), 0o755);
     expect(resolveMcpServerCommand(ENTRY, { PAA_HOME: home })).toEqual({
       command: installed,
       args: [],
@@ -48,7 +48,7 @@ describe("resolveMcpServerCommand (PBI-0132)", () => {
 
   test("AC-1 > AC-2: 両方在れば PAA_MCP_BINARY が勝つ", async () => {
     const explicit = await put(join(home, "custom-mcp"), 0o755);
-    await put(join(bin, "paa-mcp"), 0o755);
+    await put(join(bin, "atn-mcp"), 0o755);
     expect(resolveMcpServerCommand(ENTRY, { PAA_HOME: home, PAA_MCP_BINARY: explicit }).command).toBe(
       explicit,
     );
@@ -89,8 +89,8 @@ describe("resolveMcpServerCommand (PBI-0132)", () => {
     });
   });
 
-  test("AC-4 攻撃: <PAA_HOME>/bin/paa-mcp が実行不可でも explicit へ戻らず bun に落ちる", async () => {
-    await put(join(bin, "paa-mcp"), 0o644);
+  test("AC-4 攻撃: <PAA_HOME>/bin/atn-mcp が実行不可でも explicit へ戻らず bun に落ちる", async () => {
+    await put(join(bin, "atn-mcp"), 0o644);
     expect(resolveMcpServerCommand(ENTRY, { PAA_HOME: home })).toEqual({
       command: "bun",
       args: [ENTRY],

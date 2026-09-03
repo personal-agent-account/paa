@@ -12,8 +12,8 @@ import {
 // 外部 API provider 用の official adapter(PBI-0070 / EP-0009 C)。
 //
 // 他の adapter と違い **native の設定ファイルを 1 つも持たない** —— この runtime の実体は
-// 端末側の `paa agent <provider>`(PBI-0057)で、MCP server を登録する相手の CLI が存在しない。
-// それでも adapter を置くのは、自動登録(図18)が kind ごとに `paa adopt` → `adapter.register` を
+// 端末側の `atn agent <provider>`(PBI-0057)で、MCP server を登録する相手の CLI が存在しない。
+// それでも adapter を置くのは、自動登録(図18)が kind ごとに `atn adopt` → `adapter.register` を
 // 通す 1 本道だからで、ここに no-op の実装を置くことで「API runtime だけ登録経路が別」という
 // 2 本目の道を作らずに済む。
 //
@@ -35,7 +35,7 @@ export function apiProviderAdapter(provider: string, displayName: string): Runti
 
     // 端末に binary は無い。registry 側の `detect.always` と同じ理由で常に present
     async detect(): Promise<DetectResult> {
-      return { installed: true, detail: `${displayName} は端末側 runtime(paa agent)として常に利用できます` };
+      return { installed: true, detail: `${displayName} is always available as a local runtime (atn agent)` };
     },
 
     // 書くものが無い。credential は engine(install/adopt)が credentials.json へ保存済み
@@ -47,10 +47,10 @@ export function apiProviderAdapter(provider: string, displayName: string): Runti
       return [
         {
           ok: credential != null,
-          label: `${displayName} の接続`,
+          label: `${displayName} connection`,
           detail: credential
-            ? `credential あり(${credential.base_url})。API key は Connections から resolve する`
-            : "未接続。'bun run paa login' でこの Mac を接続してください",
+            ? `credential present (${credential.base_url}). The API key is resolved from Connections`
+            : "not connected. Run 'atn login' to connect this machine",
         },
       ];
     },

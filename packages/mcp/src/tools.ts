@@ -58,7 +58,7 @@ async function call(
 
 /**
  * E2EE の作法(device upsert → 宛先公開鍵 → seal / open)は `@paa/adapter` の e2ee.ts が正本。
- * `paa agent`(PBI-0057)も同じ関数を使う —— client 側に 2 つ目の実装を置かない。
+ * `atn agent`(PBI-0057)も同じ関数を使う —— client 側に 2 つ目の実装を置かない。
  */
 const e2eeCall = (config: PaaClientConfig) =>
   (path: string, init?: { method?: string; body?: unknown }) => call(config, path, init);

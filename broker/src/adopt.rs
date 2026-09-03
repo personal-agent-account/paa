@@ -1,5 +1,5 @@
 //! 自動登録(PBI-0023 / REQ-19、図18)の materialize 面。Cloud が hello の応答で返した
-//! `registered` を受け、kind ごとに `paa adopt` を起こして credential + MCP config を書かせる。
+//! `registered` を受け、kind ごとに `atn adopt` を起こして credential + MCP config を書かせる。
 //!
 //! credentials.json の書式・lock 手順・`claude mcp add` の呼び方の正本は TS 側(Common
 //! Installation Engine)の 1 箇所に置く —— Rust に写すと正本が 2 枚になり、片方だけ直る。
@@ -88,7 +88,7 @@ pub async fn adopt_with(argv: &[String], a: &Adoption) -> (bool, String) {
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("broker: paa CLI を起動できません({e})");
+            eprintln!("broker: cannot start the atn CLI ({e})");
             return (false, "paa_cli_not_found".to_string());
         }
     };
@@ -172,7 +172,7 @@ mod tests {
     // PBI-0023 AC-4b: CLI が居ない環境でも broker は落ちず、名前の付いた reason を返す
     #[tokio::test]
     async fn adopt_は_cli_が無ければ_paa_cli_not_found() {
-        let (ok, detail) = adopt_with(&argv(&["/nonexistent/paa-broker-test"]), &sample("codex")).await;
+        let (ok, detail) = adopt_with(&argv(&["/nonexistent/atn-broker-test"]), &sample("codex")).await;
         assert!(!ok);
         assert_eq!(detail, "paa_cli_not_found");
         // PAA_CLI が空文字(= 分割後 0 要素)でも同じ扱い

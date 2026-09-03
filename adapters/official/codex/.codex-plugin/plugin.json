@@ -1,5 +1,5 @@
 {
-  "name": "paa",
-  "version": "0.1.0",
-  "description": "Attach Personal Agent Account to Codex (pairing via `paa pair codex`)"
+  "name": "atn",
+  "version": "0.2.0",
+  "description": "All Together Now — attach Codex to your @handle so it can use the account's inbox and contacts (pairing via `atn pair codex`)"
 }

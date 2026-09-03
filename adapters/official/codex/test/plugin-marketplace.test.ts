@@ -18,8 +18,8 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
       name: string;
       plugins: Array<{ name: string; source: { source: string; path: string } }>;
     };
-    expect(marketplace.name).toBe("paa");
-    const entry = marketplace.plugins.find((p) => p.name === "paa");
+    expect(marketplace.name).toBe("atn");
+    const entry = marketplace.plugins.find((p) => p.name === "atn");
     expect(entry).toBeDefined();
     // source.path が実際に plugin 本体(.codex-plugin/plugin.json)へ解決する。CLI は検査しないので
     // path の typo / dir 移動への唯一の防壁がこの test(diagrams-check の図7 規則は入口の存在だけ)
@@ -32,7 +32,7 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
     const plugin = JSON.parse(
       readFileSync(join(codexPluginDir, ".codex-plugin/plugin.json"), "utf8"),
     ) as { name: string; version: string; description: string };
-    expect(plugin.name).toBe("paa");
+    expect(plugin.name).toBe("atn");
     expect(plugin.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(plugin.description.length).toBeGreaterThan(0);
   });
@@ -46,13 +46,13 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
     };
     // config の server 辞書の key 名だけが runtime 間で違う(mcpServers / mcp_servers)。
     // それ以外は command・args の形・env が同型 —— 片方だけ壊れたらこの test が刺す
-    expect(Object.keys(claude.mcpServers)).toEqual(["paa"]);
-    expect(Object.keys(codex.mcp_servers)).toEqual(["paa"]);
-    const claudeEntry = claude.mcpServers.paa!;
-    const codexEntry = codex.mcp_servers.paa!;
+    expect(Object.keys(claude.mcpServers)).toEqual(["atn"]);
+    expect(Object.keys(codex.mcp_servers)).toEqual(["atn"]);
+    const claudeEntry = claude.mcpServers.atn!;
+    const codexEntry = codex.mcp_servers.atn!;
     // PBI-0132: command は plugin dir 内の launcher(sh)。binary → bun の分岐を静的 JSON の外に置く
-    expect(claudeEntry.command).toBe("${CLAUDE_PLUGIN_ROOT}/paa-mcp");
-    expect(codexEntry.command).toBe("${PLUGIN_ROOT}/paa-mcp");
+    expect(claudeEntry.command).toBe("${CLAUDE_PLUGIN_ROOT}/atn-mcp");
+    expect(codexEntry.command).toBe("${PLUGIN_ROOT}/atn-mcp");
     // 各 file は自分の runtime の plugin root 変数だけを参照する(他方の変数の混入 = 破れ)。
     // 起動対象は bundle(PBI-0112: cache が plugin dir だけを copy する構造上 repo 参照 launcher は不可)
     expect(claudeEntry.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"]);
@@ -66,8 +66,8 @@ describe("codex plugin marketplace の構造 (PBI-0097 review)", () => {
     expect(existsSync(join(claudePluginDir, "mcp-server.bundle.js"))).toBe(true);
     expect(existsSync(join(codexPluginDir, "mcp-server.bundle.js"))).toBe(true);
     // command が指す launcher も同じく plugin dir 内に在る(PBI-0132。cache 内完結性は command 側にも要る)
-    expect(existsSync(join(claudePluginDir, "paa-mcp"))).toBe(true);
-    expect(existsSync(join(codexPluginDir, "paa-mcp"))).toBe(true);
+    expect(existsSync(join(claudePluginDir, "atn-mcp"))).toBe(true);
+    expect(existsSync(join(codexPluginDir, "atn-mcp"))).toBe(true);
   });
 });
 
@@ -90,13 +90,19 @@ describe("公開 repo README の quickstart 順序 (PBI-0096 review)", () => {
       const lines = readme.split("\n");
       const indexOfLine = (needle: string) =>
         lines.findIndex((l) => l.trim() === needle);
-      // PBI-0108 の hero 再構成後も quickstart の順序が保たれている事(PBI-0108 側の改稿で壊れない)
+      // PBI-0108 の hero 再構成後も quickstart の順序が保たれている事(PBI-0108 側の改稿で壊れない)。
+      // PBI-0154 で先頭は source clone ではなく binary の取得(curl)になった —— 順序の意図は
+      // 「何も持っていない人の道が先・既に runtime の中に居る人の道が後」で変わらないので、
+      // 基準を clone から binary quickstart に移す(clone 節は今の README には無い)。
+      const binaryLine = lines.findIndex((l) => l.includes("releases/latest/download/atn-"));
       const claudeLine = indexOfLine("claude plugin marketplace add personal-agent-account/paa");
       const codexLine = indexOfLine("codex plugin marketplace add personal-agent-account/paa");
-      const cloneLine = lines.findIndex((l) => l.includes("git clone"));
-      expect(claudeLine).toBeGreaterThanOrEqual(0);
+      expect(binaryLine).toBeGreaterThanOrEqual(0);
+      expect(claudeLine).toBeGreaterThan(binaryLine);
       expect(codexLine).toBeGreaterThan(claudeLine);
-      expect(cloneLine).toBeGreaterThan(codexLine);
+      // source からの道を戻す時も、それは plugin の後(先頭を占めない)
+      const cloneLine = lines.findIndex((l) => l.includes("git clone"));
+      if (cloneLine >= 0) expect(cloneLine).toBeGreaterThan(codexLine);
       // 重複行の混入を刺す(AC-X1 の「README 側に重複行は増えない」の機械固定)
       const countOf = (needle: string) => lines.filter((l) => l.trim() === needle).length;
       expect(countOf("claude plugin marketplace add personal-agent-account/paa")).toBe(1);

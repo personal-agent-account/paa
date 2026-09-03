@@ -73,7 +73,7 @@ pub struct Detector {
 pub struct Detect {
     /// 「この端末では常に利用できる」(PBI-0070 / EP-0009 C)。外部 API provider のように
     /// 探すべき binary / app / service を持たない runtime のための宣言 —— true なら
-    /// discovery は一切探索せずに Found を返す(実体は `paa agent <provider>`)。
+    /// discovery は一切探索せずに Found を返す(実体は `atn agent <provider>`)。
     #[serde(default)]
     pub always: bool,
     #[serde(default)]
@@ -136,10 +136,10 @@ pub fn parse(body: &str, origin: &'static str) -> Result<Registry, String> {
     let mut seen = std::collections::HashSet::new();
     for d in &reg.detectors {
         if !is_safe_id(&d.id) {
-            return Err(format!("registry: id {:?} が不正", d.id));
+            return Err(format!("registry: invalid id {:?}", d.id));
         }
         if !seen.insert(d.id.clone()) {
-            return Err(format!("registry: id {} が重複", d.id));
+            return Err(format!("registry: duplicate id {}", d.id));
         }
     }
     reg.detectors.sort_by(|a, b| a.id.cmp(&b.id));
@@ -205,7 +205,7 @@ pub fn public_key_from_hex(hex_key: &str) -> Result<VerifyingKey, String> {
     let bytes = hex::decode(hex_key).map_err(|e| format!("public key hex: {e}"))?;
     let arr: [u8; 32] = bytes
         .try_into()
-        .map_err(|_| "public key は 32byte".to_string())?;
+        .map_err(|_| "the public key must be 32 bytes".to_string())?;
     VerifyingKey::from_bytes(&arr).map_err(|e| format!("public key: {e}"))
 }
 
@@ -216,7 +216,7 @@ pub fn verify(body: &[u8], signature_b64: &str, key: &VerifyingKey) -> Result<()
         .map_err(|e| format!("signature base64: {e}"))?;
     let arr: [u8; 64] = sig_bytes
         .try_into()
-        .map_err(|_| "signature は 64byte".to_string())?;
+        .map_err(|_| "the signature must be 64 bytes".to_string())?;
     let sig = Signature::from_bytes(&arr);
     key.verify_strict(body, &sig)
         .map_err(|_| "signature mismatch".to_string())
@@ -239,19 +239,19 @@ pub fn load(cache_dir: &Path) -> Registry {
     let key = match pinned_public_key() {
         Ok(k) => k,
         Err(e) => {
-            eprintln!("broker: registry public key が不正({e})。built-in で動きます");
+            eprintln!("broker: invalid registry public key ({e}). Running with the built-in registry");
             return builtin();
         }
     };
     if let Err(e) = verify(&body, &sig, &key) {
-        eprintln!("broker: registry cache 署名不一致({e})。cache を捨てて built-in で動きます");
+        eprintln!("broker: registry cache signature mismatch ({e}). Dropping the cache and running with the built-in registry");
         discard_cache(cache_dir);
         return builtin();
     }
     match parse(&String::from_utf8_lossy(&body), "cache") {
         Ok(reg) => reg.merged_with_builtin(),
         Err(e) => {
-            eprintln!("broker: registry cache が壊れています({e})。cache を捨てて built-in で動きます");
+            eprintln!("broker: the registry cache is corrupt ({e}). Dropping the cache and running with the built-in registry");
             discard_cache(cache_dir);
             builtin()
         }
@@ -314,7 +314,7 @@ pub fn registry_url_from_ws(ws_url: &str) -> String {
 pub fn fetch_and_store(url: &str, cache_dir: &Path, etag: Option<&str>) -> FetchOutcome {
     let key = match pinned_public_key() {
         Ok(k) => k,
-        Err(e) => return FetchOutcome::Failed(format!("public key が不正: {e}")),
+        Err(e) => return FetchOutcome::Failed(format!("invalid public key: {e}")),
     };
     let agent = ureq::AgentBuilder::new().timeout(FETCH_TIMEOUT).build();
     let mut req = agent.get(url);
@@ -334,7 +334,7 @@ pub fn fetch_and_store(url: &str, cache_dir: &Path, etag: Option<&str>) -> Fetch
     }
     let sig = match resp.header(SIGNATURE_HEADER) {
         Some(s) => s.to_string(),
-        None => return FetchOutcome::Rejected(format!("{SIGNATURE_HEADER} header が無い")),
+        None => return FetchOutcome::Rejected(format!("missing {SIGNATURE_HEADER} header")),
     };
     let new_etag = resp.header("ETag").map(|s| s.to_string());
     let body = match resp.into_string() {
@@ -349,7 +349,7 @@ pub fn fetch_and_store(url: &str, cache_dir: &Path, etag: Option<&str>) -> Fetch
         Err(e) => return FetchOutcome::Failed(e),
     };
     if let Err(e) = store(cache_dir, body.as_bytes(), &sig, new_etag.as_deref()) {
-        eprintln!("broker: registry cache 書込失敗({e})。今回の registry はメモリ上でだけ使います");
+        eprintln!("broker: could not write the registry cache ({e}). This registry is used in memory only");
     }
     FetchOutcome::Updated(reg.merged_with_builtin())
 }
@@ -459,7 +459,7 @@ mod tests {
     // AC-2c: cache の body を改ざんすると load は built-in に落ちる(署名は元のまま)
     #[test]
     fn load_rejects_tampered_cache_and_falls_back_to_builtin() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-reg-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-reg-cache-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         // 署名は pin された鍵ではないので、正しい body でも load は built-in になる(pin 検証の実在確認)

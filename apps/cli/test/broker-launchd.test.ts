@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCredential } from "@paa/adapter";
 
-// PBI-0048 AC-1〜7 / X2: `paa login` の launchd 優先分岐と `paa broker install/uninstall/status`。
+// PBI-0048 AC-1〜7 / X2: `atn login` の launchd 優先分岐と `atn broker install/uninstall/status`。
 // 実マシンの ~/Library/LaunchAgents と実 launchctl には一度も触れない —— PAA_LAUNCH_AGENTS_DIR /
 // PAA_LAUNCHCTL で常に隔離する(apps/cli/test/login.test.ts と同じ設計)。
 //
@@ -89,7 +89,7 @@ async function freshEnv(opts: { launchctl?: { list: number; load: number; unload
   await mkdir(home, { recursive: true });
   await mkdir(brokerHome, { recursive: true });
   await mkdir(launchAgentsDir, { recursive: true });
-  const fakeBrokerBin = join(dir, "paa-broker-fake");
+  const fakeBrokerBin = join(dir, "atn-broker-fake");
   await writeFile(fakeBrokerBin, `#!/bin/sh\necho "spawn $$"\nexit 0\n`);
   await chmod(fakeBrokerBin, 0o755);
   const fakeOpenDir = join(dir, "fakebin");
@@ -107,7 +107,7 @@ async function freshEnv(opts: { launchctl?: { list: number; load: number; unload
     home,
     brokerHome,
     launchAgentsDir,
-    plistPath: join(launchAgentsDir, "com.paa.broker.plist"),
+    plistPath: join(launchAgentsDir, "com.atn.broker.plist"),
     launchctlLog,
     brokerPid: join(brokerHome, "broker.pid"),
     brokerLog: join(brokerHome, "broker.log"),
@@ -171,15 +171,15 @@ async function waitForContent(
   }
 }
 
-describe("paa login launchd 分岐 (PBI-0048)", () => {
+describe("atn login launchd 分岐 (PBI-0048)", () => {
   test("AC-1: 未 load なら plist を書いて load する(token は書かない)", async () => {
     const { env, plistPath, launchctlLog } = await freshEnv({ launchctl: { list: 1, load: 0, unload: 0 } });
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("launchd に登録しました");
+    expect(res.out).toContain("Registered with launchd");
 
     const plist = await readFile(plistPath, "utf8");
-    expect(plist).toContain("com.paa.broker");
+    expect(plist).toContain("com.atn.broker");
     expect(plist).not.toContain("par_launchd_"); // token 文字列が plist に無いこと
 
     const log = await waitForContent(launchctlLog, (s) => s.includes("load"));
@@ -190,7 +190,7 @@ describe("paa login launchd 分岐 (PBI-0048)", () => {
     const { env, plistPath, launchctlLog } = await freshEnv({ launchctl: { list: 0, load: 1, unload: 1 } });
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("launchd に登録しました");
+    expect(res.out).toContain("Registered with launchd");
 
     await expect(readFile(plistPath, "utf8")).rejects.toThrow();
     const log = await readFile(launchctlLog, "utf8").catch(() => "");
@@ -201,7 +201,7 @@ describe("paa login launchd 分岐 (PBI-0048)", () => {
     const { env, brokerLog, brokerPid } = await freshEnv({ launchctl: { list: 1, load: 1, unload: 1 } });
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(0);
-    expect(res.out).not.toContain("launchd に登録しました");
+    expect(res.out).not.toContain("Registered with launchd");
     expect(res.out).toContain("broker log:");
 
     // pid file は `<pid> <起動時刻>`(PBI-0048 レビュー AC-X3 の修正)。先頭が pid であることを固定する
@@ -212,14 +212,14 @@ describe("paa login launchd 分岐 (PBI-0048)", () => {
   }, 30_000);
 });
 
-describe("paa broker install/uninstall/status (PBI-0048)", () => {
+describe("atn broker install/uninstall/status (PBI-0048)", () => {
   test("AC-4: install は credential が有れば plist を書き token を含まない", async () => {
     const { env, home, plistPath } = await freshEnv({ launchctl: { list: 1, load: 0, unload: 0 } });
     await saveBrokerCredential(home, "par_install_ac4");
     const res = await paa(["broker", "install"], env);
     expect(res.code).toBe(0);
     const plist = await readFile(plistPath, "utf8");
-    expect(plist).toContain("com.paa.broker");
+    expect(plist).toContain("com.atn.broker");
     expect(plist).not.toContain("par_install_ac4");
   }, 30_000);
 
@@ -227,7 +227,7 @@ describe("paa broker install/uninstall/status (PBI-0048)", () => {
     const { env, plistPath } = await freshEnv();
     const res = await paa(["broker", "install"], env);
     expect(res.code).toBe(1);
-    expect(res.err).toContain("bun run paa login");
+    expect(res.err).toContain("atn login");
     await expect(readFile(plistPath, "utf8")).rejects.toThrow();
   }, 30_000);
 
@@ -245,14 +245,14 @@ describe("paa broker install/uninstall/status (PBI-0048)", () => {
     const { env, plistPath, brokerPid } = await freshEnv({ launchctl: { list: 0, load: 1, unload: 1 } });
     await writeFile(plistPath, "<plist>dummy</plist>");
     // process 生存: このテストプロセス自身の pid と起動時刻を broker.pid に書いて「生存」を再現する
-    // (pid だけの旧形式は paa-broker 以外を生存とみなさない —— PBI-0048 レビュー AC-X3 の修正)
+    // (pid だけの旧形式は atn-broker 以外を生存とみなさない —— PBI-0048 レビュー AC-X3 の修正)
     await writeFile(brokerPid, `${process.pid} ${await lstartOf(process.pid)}`);
 
     const res = await paa(["broker", "status"], env);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("インストール済み");
-    expect(res.out).toContain("登録済み");
-    expect(res.out).toContain(`生存 (pid ${process.pid})`);
+    expect(res.out).toContain("launchd plist: installed");
+    expect(res.out).toContain("launchd job: registered");
+    expect(res.out).toContain(`running (pid ${process.pid})`);
   }, 30_000);
 
   test("AC-X2: install 失敗時は plist を残したまま exit 1 で理由を出す", async () => {
@@ -260,10 +260,10 @@ describe("paa broker install/uninstall/status (PBI-0048)", () => {
     await saveBrokerCredential(home, "par_install_x2");
     const res = await paa(["broker", "install"], env);
     expect(res.code).toBe(1);
-    expect(res.err).toContain("NG launchd への登録に失敗しました");
+    expect(res.err).toContain("NG registering with launchd failed");
     // plist は書き込み済みのまま残る(次回 install で上書きされる想定)
     const plist = await readFile(plistPath, "utf8");
-    expect(plist).toContain("com.paa.broker");
+    expect(plist).toContain("com.atn.broker");
   }, 30_000);
 });
 
@@ -275,16 +275,16 @@ describe("PBI-0048 review: AC-X2 / AC-X3 攻撃", () => {
     async () => {
       const { env, home, plistPath, launchctlLog } = await freshEnv({ launchctl: { list: 1, load: 0, unload: 0 } });
       await saveBrokerCredential(home, "par_review_x2");
-      env.PAA_BROKER_BIN = join(root, "does-not-exist-paa-broker");
+      env.PAA_BROKER_BIN = join(root, "does-not-exist-atn-broker");
       const res = await paa(["login", "--no-open"], env);
       // PBI-0046 AC-4 と同じ失敗様式を launchd 経路でも期待する: exit 1 + cargo build の案内
       expect(res.code).toBe(1);
       expect(res.err).toContain("cargo build");
-      expect(res.out).not.toContain("launchd に登録しました");
+      expect(res.out).not.toContain("Registered with launchd");
       await expect(readFile(plistPath, "utf8")).rejects.toThrow();
       expect(await readFile(launchctlLog, "utf8").catch(() => "")).not.toContain("load ");
 
-      // `paa broker install` 単体も同じ(登録してから launchd 側で失敗し続ける経路を残さない)
+      // `atn broker install` 単体も同じ(登録してから launchd 側で失敗し続ける経路を残さない)
       const install = await paa(["broker", "install"], env);
       expect(install.code).toBe(1);
       expect(install.err).toContain("cargo build");
@@ -301,23 +301,23 @@ describe("PBI-0048 review: AC-X2 / AC-X3 攻撃", () => {
       await writeFile(brokerPid, "1");
       const res = await paa(["broker", "status"], env);
       expect(res.code).toBe(0);
-      expect(res.out).toContain("broker process: 停止");
+      expect(res.out).toContain("broker process: stopped");
 
       // 起動時刻付きでも、時刻が合わなければ(= 別 boot の同じ番号)停止
       await writeFile(brokerPid, `${process.pid} Thu Jan 1 00:00:00 1970`);
-      expect((await paa(["broker", "status"], env)).out).toContain("broker process: 停止");
+      expect((await paa(["broker", "status"], env)).out).toContain("broker process: stopped");
 
       // 生きている本物(このテストプロセス)を起動時刻付きで指せば生存(AC-7 と同じ)
       await writeFile(brokerPid, `${process.pid} ${await lstartOf(process.pid)}`);
-      expect((await paa(["broker", "status"], env)).out).toContain(`生存 (pid ${process.pid})`);
+      expect((await paa(["broker", "status"], env)).out).toContain(`running (pid ${process.pid})`);
 
-      // stale(pid 1)を指したまま `paa broker`(前景・launchd が起こす入口)を実行すると起動できる
+      // stale(pid 1)を指したまま `atn broker`(前景・launchd が起こす入口)を実行すると起動できる
       await writeFile(brokerPid, "1");
       await saveBrokerCredential(join(env.PAA_HOME!), "par_review_x3");
       const fg = await paa(["broker"], env);
       expect(fg.code).toBe(0);
       expect(fg.out).toContain("spawn");
-      expect(fg.err).not.toContain("既に起動しています");
+      expect(fg.err).not.toContain("already running");
       expect(await readFile(brokerLog, "utf8").catch(() => "")).toBe("");
     },
     30_000,
@@ -327,10 +327,10 @@ describe("PBI-0048 review: AC-X2 / AC-X3 攻撃", () => {
 // ---- PBI-0048 再レビュー(有界)の攻撃 test(2026-08-28)。レビューセッションが追加 ----
 describe("PBI-0048 再レビュー: AC-X3 攻撃", () => {
   test(
-    "pid file が空 / garbage でも『停止』と判定し、paa broker が起動できる(起動不能のままにならない)",
+    "pid file が空 / garbage でも『停止』と判定し、atn broker が起動できる(起動不能のままにならない)",
     async () => {
       // fix は `<pid> <lstart>` 形式を前提にする — 破損入力(空文字 / 英字 garbage / 0 や負のような
-      // 実在しない番号)が parse で例外にならず「停止」に倒れ、KeepAlive で起こされた paa broker が
+      // 実在しない番号)が parse で例外にならず「停止」に倒れ、KeepAlive で起こされた atn broker が
       // 永久に起動不能に陥らないことを固定する
       const { env, brokerPid, brokerHome } = await freshEnv({ launchctl: { list: 0, load: 1, unload: 1 } });
       await saveBrokerCredential(join(env.PAA_HOME!), "par_review_corrupt");
@@ -339,7 +339,7 @@ describe("PBI-0048 再レビュー: AC-X3 攻撃", () => {
         await writeFile(brokerPid, garbage);
         const st = await paa(["broker", "status"], env);
         expect(st.code).toBe(0);
-        expect(st.out).toContain("broker process: 停止");
+        expect(st.out).toContain("broker process: stopped");
       }
 
       // 破損 pid file のまま foreground(launchd が実行する入口)で起動できる
@@ -347,7 +347,7 @@ describe("PBI-0048 再レビュー: AC-X3 攻撃", () => {
       const fg = await paa(["broker"], env);
       expect(fg.code).toBe(0);
       expect(fg.out).toContain("spawn");
-      expect(fg.err).not.toContain("既に起動しています");
+      expect(fg.err).not.toContain("already running");
       // 起動後は pid file が新鮮な形式で置き換わっている
       const pidRaw = (await readFile(brokerPid, "utf8")).trim();
       expect(pidRaw).not.toBe("not-a-pid");

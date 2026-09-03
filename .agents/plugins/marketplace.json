@@ -1,11 +1,11 @@
 {
-  "name": "paa",
+  "name": "atn",
   "interface": {
-    "displayName": "Personal Agent Account"
+    "displayName": "All Together Now"
   },
   "plugins": [
     {
-      "name": "paa",
+      "name": "atn",
       "source": {
         "source": "local",
         "path": "./adapters/official/codex"

@@ -114,3 +114,35 @@ export function parseRecipient(
   const h = validateHandle(withoutAt);
   return h.ok ? { kind: "handle", handle: h.handle } : null;
 }
+
+// ---- phone number(PBI-0152) ----
+//
+// **正規化はここ 1 箇所**。登録側(PUT /v1/me/phone)と解決側(POST /v1/sessions/password)が
+// 別々に整形すると、「登録できたのにサインインできない番号」が生まれる。
+// 国番号の推測はしない(`090…` を勝手に `+8190…` にしない) —— 間違えると他人の番号になる。
+
+/** 入力が phone number の**つもり**か。`@` を含む物・handle は除く(識別子の三択に使う) */
+export function looksLikePhoneNumber(input: string): boolean {
+  // 判定は normalizePhoneNumber に寄せる(2 つ目の規則を作らない)
+  return normalizePhoneNumber(input) !== null;
+}
+
+/**
+ * E.164 に寄せる(`+` + 数字 7〜15 桁)。整形できなければ null。
+ * `+81 90-1234-5678` → `+819012345678` / `09012345678` → `09012345678`(国番号は補わない)
+ */
+export function normalizePhoneNumber(input: string): string | null {
+  const trimmed = input.trim();
+  // **文字が混ざっていたら捨てる**: 数字以外を落とすだけだと `+81-90-abcd-5678` が
+  // `+81905678` という別人の番号になる。許すのは先頭の + と 数字 / 空白 / ( ) - だけ
+  if (!/^\+?[\d\s()-]+$/.test(trimmed)) return null;
+  const plus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return null;
+  return plus ? `+${digits}` : digits;
+}
+
+/** log / activity 用。**全桁を残さない**(下 4 桁だけ) */
+export function maskPhoneNumber(normalized: string): string {
+  return `…${normalized.slice(-4)}`;
+}

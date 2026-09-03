@@ -4,7 +4,7 @@
 //! `remove_var` はプロセス全体に効くので、1 つのテストが env を差し替えている最中に別のテストが
 //! それを読むと、どちらのテストも書いた人の意図と違う値を見る。実害はレースで終わらない —
 //! PBI-0019 が入れた `set_var("PAA_BROKER_HOME", tmp_file)` は、隣のテストの `remove_var` が
-//! 割り込むと `broker_home()` が実 `$HOME/.paa/broker` を返し、`session_dir_failed` で止まるはずの
+//! 割り込むと `broker_home()` が実 `$HOME/.atn/broker` を返し、`session_dir_failed` で止まるはずの
 //! 経路が **PATH 上の実 claude CLI の spawn まで進んだ**(`launch.rs` が明示的に避けている事故)。
 //!
 //! そのため broker では env を読むのを呼び出し口だけに閉じ、テストは値を**引数で**渡す

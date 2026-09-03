@@ -20,7 +20,7 @@ export const MCP_SERVER_ENTRY = fileURLToPath(
 );
 
 /** runtime 側の設定に載る MCP server 名 */
-export const MCP_SERVER_NAME = "paa";
+export const MCP_SERVER_NAME = "atn";
 
 export const DEFAULT_BASE_URL = "http://localhost:8787";
 
@@ -89,7 +89,7 @@ export async function installRuntime(options: InstallOptions): Promise<InstallOu
 
   // register の**前**に binary を置く —— register が書き込む command は
   // resolveMcpServerCommand(PBI-0132)の結果なので、順序が逆だと今回の install だけ bun のまま残る
-  const binary = await ensureBinary("paa-mcp", { env });
+  const binary = await ensureBinary("atn-mcp", { env });
 
   await adapter.register(ctx, {
     serverEntry: options.serverEntry ?? MCP_SERVER_ENTRY,
@@ -108,26 +108,26 @@ export async function installRuntime(options: InstallOptions): Promise<InstallOu
 
 /**
  * binary 取得の結果を 1 finding に。**取れなかったこと自体は失敗ではない**(bun 経路で動く)ので
- * ok:true —— ここを false にすると network が無いだけで `paa install` が exit 1 になる。
+ * ok:true —— ここを false にすると network が無いだけで `atn install` が exit 1 になる。
  * checksum 不一致だけは ok:false(壊れた / すり替えられた binary は黙って流さない)。
  */
 function binaryFinding(outcome: EnsureBinaryOutcome): Finding {
   switch (outcome.status) {
     case "present":
-      return { ok: true, label: "MCP binary", detail: `${outcome.path}(最新版が置かれています)` };
+      return { ok: true, label: "MCP binary", detail: `${outcome.path} (already the latest version)` };
     case "downloaded":
       return {
         ok: true,
         label: "MCP binary",
-        detail: `${outcome.path} に ${outcome.target} 版を取得しました(bun 不要で起動します)`,
+        detail: `fetched the ${outcome.target} build into ${outcome.path} (runs without bun)`,
       };
     case "checksum_mismatch":
-      return { ok: false, label: "MCP binary", detail: `${outcome.detail}。置きませんでした` };
+      return { ok: false, label: "MCP binary", detail: `${outcome.detail}. Nothing was placed` };
     default:
       return {
         ok: true,
         label: "MCP binary",
-        detail: `${outcome.detail}。bun 経路で登録します(bun が要ります)`,
+        detail: `${outcome.detail}. Registering the bun path instead (bun is required)`,
       };
   }
 }
@@ -170,7 +170,7 @@ export async function doctorRuntime(options: EngineOptions): Promise<Finding[]> 
   const detected = await adapter.detect(ctx);
   findings.push({
     ok: detected.installed,
-    label: `${adapter.displayName} を検出`,
+    label: `${adapter.displayName} detected`,
     detail: detected.detail,
   });
 
@@ -179,7 +179,7 @@ export async function doctorRuntime(options: EngineOptions): Promise<Finding[]> 
     findings.push({
       ok: false,
       label: "credential",
-      detail: `未 pair。'bun run paa install ${adapter.id}' を実行してください`,
+      detail: `not paired. Run 'atn install ${adapter.id}'`,
     });
     return findings;
   }
@@ -194,16 +194,16 @@ export async function doctorRuntime(options: EngineOptions): Promise<Finding[]> 
     who.status === 200
       ? {
           ok: true,
-          label: "Account 接続",
-          detail: `@${who.body.handle} として attach 済み (unread ${who.body.unread})`,
+          label: "Account connection",
+          detail: `attached as @${who.body.handle} (unread ${who.body.unread})`,
         }
       : {
           ok: false,
-          label: "Account 接続",
+          label: "Account connection",
           detail:
             who.status === 401
-              ? `credential が失効しています(revoke 済み)。'bun run paa install ${adapter.id}' で再接続してください`
-              : `whoami が ${who.status} を返しました`,
+              ? `the credential was revoked. Reconnect with 'atn install ${adapter.id}'`
+              : `whoami returned ${who.status}`,
         },
   );
 
@@ -215,7 +215,7 @@ export async function doctorRuntime(options: EngineOptions): Promise<Finding[]> 
 /**
  * extension sync の drift(failed / revision 未追随)を 1 finding にまとめる。
  * fetch 失敗(旧 server・一時的ネットワーク断)や extension が 0 件の場合は ok:true にする ——
- * ここを false にすると 'paa install' の成否が Extension Sync という無関係な機能に
+ * ここを false にすると 'atn install' の成否が Extension Sync という無関係な機能に
  * 引きずられて exit code 1 になってしまう
  */
 async function extensionDriftFinding(
@@ -225,7 +225,7 @@ async function extensionDriftFinding(
 ): Promise<Finding> {
   const res = await apiCall(baseUrl, "/v1/extensions", { token }).catch(() => null);
   if (!res || res.status !== 200 || !Array.isArray(res.body)) {
-    return { ok: true, label: "Extensions", detail: "確認できませんでした(server 未対応の可能性)" };
+    return { ok: true, label: "Extensions", detail: "could not be checked (the server may not support it)" };
   }
   let failed = 0;
   let behind = 0;
@@ -245,7 +245,7 @@ async function extensionDriftFinding(
   return {
     ok: failed === 0 && behind === 0,
     label: "Extensions",
-    detail: `failed ${failed} / 未追随 ${behind}`,
+    detail: `failed ${failed} / behind ${behind}`,
   };
 }
 

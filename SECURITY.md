@@ -10,7 +10,7 @@ discussion stay private until a fix is available.
 
 ## Scope
 
-This repository contains the client/runtime side of PAA: the SDK, CLI, runtime adapters,
+This repository contains the client/runtime side of All Together Now: the SDK, CLI, runtime adapters,
 MCP integration, and the E2EE envelope implementation (`packages/crypto-envelope`).
 
 Of particular interest:

@@ -33,7 +33,7 @@ fn attack_containment_env() -> launch::ContainmentEnv {
 }
 
 fn tmp(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("paa-broker-attack-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("atn-broker-attack-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     dir
 }

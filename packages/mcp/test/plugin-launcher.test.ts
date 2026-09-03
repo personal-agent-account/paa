@@ -106,7 +106,7 @@ describe("plugin bundle の MCP 往復", () => {
     expect(session.stderr()).not.toContain("package.json");
 
     // AC-1: handshake が成立する(stdout に JSON-RPC 以外が混ざっていたらここで落ちる)
-    expect(session.client.getServerVersion()?.name).toBe("paa-account");
+    expect(session.client.getServerVersion()?.name).toBe("atn-account");
 
     // AC-2: 要件 §16 の 13 tools が過不足なく並ぶ(memory.* / task.* 等を生やさない)
     const tools = (await session.client.listTools()).tools.map((t) => t.name).sort();
@@ -137,8 +137,8 @@ describe("plugin bundle の MCP 往復", () => {
     ]);
 
     expect(await proc.exited).toBe(1);
-    expect(stderr).toContain("PAA credential が見つかりません");
-    expect(stderr).toContain("bun run paa install claude");
+    expect(stderr).toContain("No All Together Now credential was found");
+    expect(stderr).toContain("atn install claude");
     // stdout は MCP の stdio transport 用。1 byte でも混ぜたら JSON-RPC が壊れる
     expect(stdout).toBe("");
     await rm(emptyHome, { recursive: true, force: true });

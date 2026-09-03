@@ -34,7 +34,7 @@ const base = createMcpConfigAdapter({
   id: "claude",
   displayName: "Claude Code",
   bin: "claude",
-  installHint: "claude CLI が見つかりません (https://claude.com/claude-code)",
+  installHint: "claude CLI was not found (https://claude.com/claude-code)",
   configPath: userConfigPath,
   format: "json",
   serversKey: "mcpServers",

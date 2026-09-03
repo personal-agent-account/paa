@@ -41,42 +41,42 @@ describe("geminiAdapter (PBI-0061)", () => {
       serverEntry: "/repo/packages/mcp/src/server.ts",
       runtimeKind: "gemini",
       baseUrl: "http://localhost:8787",
-      serverName: "paa",
+      serverName: "atn",
     });
     const lines = await argvLines();
-    expect(lines[0]).toBe("mcp remove -s user paa");
+    expect(lines[0]).toBe("mcp remove -s user atn");
     // 実測: gemini mcp add [-s user] [-e K=V ...] <name> <commandOrUrl> [args...]
     // `--` を挟むと commandOrUrl が "--" になってしまう(claude / codex との違い)
     expect(lines[1]).toBe(
-      "mcp add -s user -e PAA_RUNTIME_KIND=gemini -e PAA_URL=http://localhost:8787 paa bun /repo/packages/mcp/src/server.ts",
+      "mcp add -s user -e PAA_RUNTIME_KIND=gemini -e PAA_URL=http://localhost:8787 atn bun /repo/packages/mcp/src/server.ts",
     );
     expect(lines[1]).not.toContain(" -- ");
   });
 
   test("AC-1: project scope を使わない(cwd 依存と untrusted folder の罠を持ち込まない)", async () => {
-    await geminiAdapter.unregister(ctx(), "paa");
+    await geminiAdapter.unregister(ctx(), "atn");
     const lines = await argvLines();
-    expect(lines[0]).toBe("mcp remove -s user paa");
+    expect(lines[0]).toBe("mcp remove -s user atn");
     expect(lines[0]).not.toContain("project");
   });
 
   test("AC-2: GEMINI_CLI_HOME 配下の settings.json を読む(実 ~/.gemini を触らない)", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ mcpServers: { paa: {}, unityMCP: {} } }));
+    await writeFile(settingsPath(), JSON.stringify({ mcpServers: { atn: {}, unityMCP: {} } }));
     expect((await geminiAdapter.listExtensions(ctx())).map((e) => e.name).sort()).toEqual([
-      "paa",
+    "atn",
       "unityMCP",
     ]);
-    const [ok] = await geminiAdapter.doctor(ctx(), "paa");
+    const [ok] = await geminiAdapter.doctor(ctx(), "atn");
     expect(ok!.ok).toBe(true);
     expect(ok!.detail).toContain(settingsPath());
-    expect(ok!.label).toBe("Gemini CLI の MCP 登録");
+    expect(ok!.label).toBe("Gemini CLI MCP registration");
   });
 
   test("AC-2: 未登録なら doctor が install 案内を出す", async () => {
     await writeFile(settingsPath(), JSON.stringify({ mcpServers: {} }));
-    const [ng] = await geminiAdapter.doctor(ctx(), "paa");
+    const [ng] = await geminiAdapter.doctor(ctx(), "atn");
     expect(ng!.ok).toBe(false);
-    expect(ng!.detail).toContain("bun run paa install gemini");
+    expect(ng!.detail).toContain("atn install gemini");
   });
 
   test("detect: CLI が有れば version、無ければ install 案内", async () => {
@@ -92,14 +92,14 @@ describe("geminiAdapter (PBI-0061)", () => {
     });
     expect(missing).toEqual({
       installed: false,
-      detail: "gemini CLI が見つかりません (npm i -g @google/gemini-cli)",
+      detail: "gemini CLI was not found (npm i -g @google/gemini-cli)",
     });
   });
 
   test("AC-X2: settings.json が無い / 壊れていても throw せず 0 件・ok:false", async () => {
     await rm(settingsPath(), { force: true });
     expect(await geminiAdapter.listExtensions(ctx())).toEqual([]);
-    expect((await geminiAdapter.doctor(ctx(), "paa"))[0]!.ok).toBe(false);
+    expect((await geminiAdapter.doctor(ctx(), "atn"))[0]!.ok).toBe(false);
     await writeFile(settingsPath(), "{ broken");
     expect(await geminiAdapter.listExtensions(ctx())).toEqual([]);
   });

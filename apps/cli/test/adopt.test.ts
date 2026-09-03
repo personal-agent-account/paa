@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// `paa adopt`(PBI-0023): broker が hello の応答で受け取った credential を非対話で materialize する。
+// `atn adopt`(PBI-0023): broker が hello の応答で受け取った credential を非対話で materialize する。
 // 実 CLI(codex / claude)には到達させない —— PATH の先頭に fake を置き、そこへ渡った argv を
 // marker file で観測する(EP-0001 LEARN 13)。
 
@@ -59,7 +59,7 @@ const OK_ARGS = [
   "--token-stdin",
 ];
 
-describe("paa adopt (PBI-0023)", () => {
+describe("atn adopt (PBI-0023)", () => {
   test("credential を保存し MCP を登録する。token は argv に出ない", async () => {
     const res = await adopt(OK_ARGS, `${TOKEN}\n`);
     expect(res.code).toBe(0);
@@ -166,7 +166,7 @@ describe("paa adopt (PBI-0023)", () => {
       `${TOKEN}\n`,
     );
     expect(res.code).toBe(2);
-    expect(res.err).toContain("未対応の runtime");
+    expect(res.err).toContain("unsupported runtime");
   });
 
   test("stdin が空なら exit 2(空 token を保存しない)", async () => {
@@ -230,10 +230,10 @@ describe("paa adopt (PBI-0023)", () => {
 });
 
 // PBI-0050 AC-1 / AC-X2: launchd が broker を最小 PATH(/usr/bin:/bin:/usr/sbin:/sbin)で起こすと、
-// broker → `paa adopt` → adapter.register の `claude mcp add` が bare な "claude" を解決できず
+// broker → `atn adopt` → adapter.register の `claude mcp add` が bare な "claude" を解決できず
 // ENOENT で自動登録が全滅する。run() の PATH 補強(broker の default_bin_dirs 相当)で
 // `~/.local/bin` 等から absolute path 解決できることを、launchd 相当 env の subprocess で固定する。
-describe("paa adopt — launchd 最小 PATH (PBI-0050)", () => {
+describe("atn adopt — launchd 最小 PATH (PBI-0050)", () => {
   let lroot = "";
   let lhome = "";
   let lmarker = "";
@@ -294,7 +294,7 @@ describe("paa adopt — launchd 最小 PATH (PBI-0050)", () => {
     const res = await adoptLaunchd("claude", emptyHome, "");
     expect(res.code).toBe(2);
     const first = res.err.split("\n")[0]!;
-    expect(first).toContain("claude が見つかりません");
+    expect(first).toContain("claude was not found");
     // 生 stack trace を stderr 1 行目に晒さない(broker が register_ack の detail に載せる)
     expect(first).not.toContain("at ");
   });

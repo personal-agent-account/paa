@@ -53,7 +53,7 @@ class MainActivity : Activity() {
         }
         root.addView(col)
 
-        col.addView(text("PAA Collector", 22f, bold = true))
+        col.addView(text("All Together Now Collector", 22f, bold = true))
 
         // --- Connection ---
         col.addView(sectionLabel("Connection"))

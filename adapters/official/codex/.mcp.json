@@ -1,7 +1,7 @@
 {
   "mcp_servers": {
-    "paa": {
-      "command": "${PLUGIN_ROOT}/paa-mcp",
+    "atn": {
+      "command": "${PLUGIN_ROOT}/atn-mcp",
       "args": ["${PLUGIN_ROOT}/mcp-server.bundle.js"],
       "env": {
         "PAA_RUNTIME_KIND": "codex"

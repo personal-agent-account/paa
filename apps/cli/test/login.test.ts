@@ -4,7 +4,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCredential } from "@paa/adapter";
 
-// PBI-0046 AC-1〜5 / X2〜X3: `paa login` / `paa broker`。実 broker binary へは到達させず、
+// PBI-0046 AC-1〜5 / X2〜X3: `atn login` / `atn broker`。実 broker binary へは到達させず、
 // `PAA_BROKER_BIN` に fake shell script を注入する(apps/cli/test/adopt.test.ts と同じ手法。
 // EP-0001 LEARN 13)。自動 open(AC-3)は `process.stdout.isTTY` が pipe 経由の子プロセスでは
 // 常に false になり test harness から正の検証ができないため、「非対話実行では発火しない」
@@ -125,7 +125,7 @@ async function freshEnv(
   await mkdir(home, { recursive: true });
   await mkdir(brokerHome, { recursive: true });
   await mkdir(launchAgentsDir, { recursive: true });
-  const bin = join(dir, "paa-broker-fake");
+  const bin = join(dir, "atn-broker-fake");
   await writeFile(bin, fakeBrokerScript(opts.longLived ?? false));
   await chmod(bin, 0o755);
   const openLog = join(dir, "open.log");
@@ -147,7 +147,7 @@ async function freshEnv(
     brokerPid: join(brokerHome, "broker.pid"),
     openLog,
     launchAgentsDir,
-    plistPath: join(launchAgentsDir, "com.paa.broker.plist"),
+    plistPath: join(launchAgentsDir, "com.atn.broker.plist"),
     launchctlLog,
     env: {
       PATH: `${fakeOpenDir}:${process.env.PATH ?? ""}`,
@@ -194,13 +194,13 @@ async function waitForContent(
   }
 }
 
-describe("paa login / paa broker (PBI-0046)", () => {
+describe("atn login / atn broker (PBI-0046)", () => {
   test("AC-1: credential 無しから pairing して broker を detached 起動する", async () => {
     const { env, home, brokerLog, brokerPid } = await freshEnv();
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("この Mac は @aya に接続されました");
-    expect(res.out).toContain("Your AI に並びます");
+    expect(res.out).toContain("This machine is now connected to @aya");
+    expect(res.out).toContain("appear under Your AI");
 
     const file = await readJson(join(home, "credentials.json"));
     expect(file.runtimes.broker).toMatchObject({ name: hostname(), base_url: BASE_URL });
@@ -237,7 +237,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
     );
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("この Mac は @aya に接続されました");
+    expect(res.out).toContain("This machine is now connected to @aya");
     expect(pairStartCalls).toBe(0);
   }, 30_000);
 
@@ -260,7 +260,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
     // 「接続しました」を偽陽性で出さないことを固定する
     const res = await paa(["login", "--no-open", "--url", "http://127.0.0.1:1"], env);
     expect(res.code).not.toBe(0);
-    expect(res.out).not.toContain("接続されました");
+    expect(res.out).not.toContain("now connected");
   }, 30_000);
 
   test("AC-4: binary が見つからない場合は build 案内で exit 1(credential は保持される)", async () => {
@@ -278,7 +278,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
       },
       { PAA_HOME: home },
     );
-    const res = await paa(["broker"], { ...env, PAA_BROKER_BIN: "/nonexistent/paa-broker-xyz" });
+    const res = await paa(["broker"], { ...env, PAA_BROKER_BIN: "/nonexistent/atn-broker-xyz" });
     expect(res.code).toBe(1);
     expect(res.err).toContain("cargo build --release --manifest-path broker/Cargo.toml");
     // credential は broker 起動失敗と無関係に保持され続ける
@@ -293,7 +293,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
 
     const second = await paa(["login", "--no-open"], env);
     expect(second.code).toBe(0);
-    expect(second.out).toContain("既に起動しています");
+    expect(second.out).toContain("already running");
 
     const log = await waitForContent(brokerLog, (s) => s.includes("spawn "));
     const spawnCount = log.split("\n").filter((l) => l.startsWith("spawn ")).length;
@@ -315,7 +315,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
     claimMode = "transient503";
     const res = await paa(["login", "--no-open"], env);
     expect(res.code).toBe(1);
-    expect(res.err).toContain("NG pairing に失敗しました");
+    expect(res.err).toContain("NG pairing failed");
     const file = await readJson(join(home, "credentials.json")).catch(() => ({ runtimes: {} }));
     expect(file.runtimes.broker).toBeUndefined();
   }, 30_000);
@@ -344,7 +344,7 @@ describe("paa login / paa broker (PBI-0046)", () => {
     const { env } = await freshEnv();
     const res = await paa(["broker"], env);
     expect(res.code).toBe(1);
-    expect(res.err).toContain("bun run paa login");
+    expect(res.err).toContain("atn login");
   }, 30_000);
 });
 
@@ -358,8 +358,8 @@ describe("PBI-0046 review: AC-X2 / AC-X3 攻撃", () => {
       env.PAA_URL = "http://127.0.0.1:9"; // 閉じている port → fetch が reject
       const res = await paa(["login", "--no-open"], env);
       expect(res.code).toBe(1);
-      expect(res.err).toContain("NG pairing に失敗しました");
-      expect(res.err).toContain("に接続できません");
+      expect(res.err).toContain("NG pairing failed");
+      expect(res.err).toContain("cannot connect to");
       expect(res.err).not.toContain("Unable to connect");
     },
     30_000,

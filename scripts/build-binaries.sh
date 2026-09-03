@@ -1,14 +1,14 @@
 #!/bin/sh
 # paa の単体実行ファイルを作る(PBI-0132)。end user から bun を剥がすための前半 ——
-# 「置いてあれば使う」側は launcher(packages/mcp/paa-mcp)と resolveMcpServerCommand が持つ。
+# 「置いてあれば使う」側は launcher(packages/mcp/atn-mcp)と resolveMcpServerCommand が持つ。
 #
 #   ./scripts/build-binaries.sh                    配布 target 全部(darwin-arm64 / darwin-x64 / linux-x64)
-#   ./scripts/build-binaries.sh --host-only        今の機械向けだけ → dist/paa-mcp, dist/paa
-#   ./scripts/build-binaries.sh --host-only paa-mcp  1 本だけ
+#   ./scripts/build-binaries.sh --host-only        今の機械向けだけ → dist/atn-mcp, dist/paa
+#   ./scripts/build-binaries.sh --host-only atn-mcp  1 本だけ
 #   ./scripts/build-binaries.sh --out /tmp/x       出力先を変える
 #
 # **binary は git に入れない**(1 本 61MB)。dist/ は .gitignore 済み。
-# Release への添付と `paa install` からの自動取得は PBI-0137(本 PBI のスコープ外)。
+# Release への添付と `atn install` からの自動取得は PBI-0137(本 PBI のスコープ外)。
 set -eu
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -26,13 +26,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ -n "$names" ] || names="paa-mcp paa"
+[ -n "$names" ] || names="atn-mcp paa"
 
 entry_for() {
   case "$1" in
-    paa-mcp) echo "packages/mcp/src/server.ts" ;;
+    atn-mcp) echo "packages/mcp/src/server.ts" ;;
     paa) echo "apps/cli/src/paa.ts" ;;
-    *) echo "unknown binary: $1 (paa-mcp | paa)" >&2; exit 2 ;;
+    *) echo "unknown binary: $1 (atn-mcp | paa)" >&2; exit 2 ;;
   esac
 }
 

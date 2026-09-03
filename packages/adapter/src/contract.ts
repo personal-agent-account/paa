@@ -127,7 +127,7 @@ export class AdapterError extends Error {
 /**
  * `run()` が bare な command を解決する時に PATH の後ろへ足す dir(PBI-0050)。
  * broker の discovery `default_bin_dirs`(broker/src/discovery.rs) と同じ一覧 — launchd が
- * `paa broker` を最小 PATH(`/usr/bin:/bin:/usr/sbin:/sbin`)で起こした時も、adopt →
+ * `atn broker` を最小 PATH(`/usr/bin:/bin:/usr/sbin:/sbin`)で起こした時も、adopt →
  * `claude mcp add` がユーザーの install 先(`~/.local/bin` 等)を解決できるようにする。
  * broker が検出した場所で登録できないと自動登録(EP-0004)が heartbeat 毎に失敗し続けるので、
  * この一覧は broker 側と意図的に同じ内容を保つ(片方だけ直ると検出と登録が噛み合わない)
@@ -179,7 +179,7 @@ function resolveCommand(env: Record<string, string>, cmd: string): string {
   const found = whichIn(extraPathDirs(env), cmd);
   if (found) return found;
   throw new Error(
-    `${cmd} が見つかりません(インストール済みなら PATH を、未 install なら runtime の install を確認してください)`,
+    `${cmd} was not found (if it is installed, check PATH; otherwise install the runtime first)`,
   );
 }
 

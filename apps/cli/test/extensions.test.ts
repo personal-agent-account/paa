@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { saveCredential } from "@paa/adapter";
 
 // AC-11/12(2 runtime の credential store 分離)/ AC-15,16(dry-run と冪等性)を
-// CLI(paa sync / paa extensions)経由で検査する。実 claude/codex CLI には依存しない ——
+// CLI(atn sync / atn extensions)経由で検査する。実 claude/codex CLI には依存しない ——
 // dry-run と「差分なし」の noop 経路は adapter.applyExtension を一度も呼ばないため、
 // native CLI を shell out する機会が無い(kind=plugin は常に unsupported になるので同様)。
 
@@ -78,7 +78,7 @@ async function paa(args: string[], home: string) {
   return { exitCode: await proc.exited, stdout, stderr };
 }
 
-describe("paa sync / paa extensions", () => {
+describe("atn sync / atn extensions", () => {
   test("AC-11/12: 別 PAA_HOME の credential store は互いに独立し、それぞれ自分の token で status を書く", async () => {
     // kind=plugin は claude adapter の extensionKinds(["mcp"])に無いので必ず unsupported になり、
     // native CLI を一切呼ばずに 1 回だけ status POST が発生する(credential 分離だけを見る検査)
@@ -167,11 +167,11 @@ describe("paa sync / paa extensions", () => {
 
     const result = await paa(["sync", "claude"], home);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("差分なし");
+    expect(result.stdout).toContain("no changes");
     expect(statusCalls).toEqual([]);
   }, 30_000);
 
-  test("paa extensions: desired 一覧 + runtime 別 status を表示する", async () => {
+  test("atn extensions: desired 一覧 + runtime 別 status を表示する", async () => {
     desiredResponse = [
       {
         id: "ext_gh",
@@ -199,8 +199,8 @@ describe("paa sync / paa extensions", () => {
 
   test("未接続なら extensions / sync は次の一手を示して失敗する", async () => {
     const home = await isolatedHome();
-    expect((await paa(["extensions"], home)).stderr).toContain("bun run paa login");
-    expect((await paa(["sync"], home)).stderr).toContain("bun run paa login");
+    expect((await paa(["extensions"], home)).stderr).toContain("atn login");
+    expect((await paa(["sync"], home)).stderr).toContain("atn login");
   }, 30_000);
 
   test("AC-14: 1 件でも failed が有れば sync の exit code は 1 になる", async () => {

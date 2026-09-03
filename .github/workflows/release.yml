@@ -1,7 +1,7 @@
 # tag を打つと単体実行ファイル + broker(Rust)binary を作って Release に添付する(PBI-0137・PBI-0154)。
 #
-# `paa install` / `paa login` と plugin の launcher はここで公開された asset を取りに来る
-# (`https://github.com/<owner>/<repo>/releases/download/v<version>/paa-mcp-<target>`)。
+# `atn install` / `atn login` と plugin の launcher はここで公開された asset を取りに来る
+# (`https://github.com/<owner>/<repo>/releases/download/v<version>/atn-mcp-<target>`)。
 # **公開 repo(personal-agent-account/paa)側で走った Release だけが token 無しで取れる** ——
 # 正本 repo(private)で走らせた場合、asset は private になり取得側は 404 になる。
 # action の版は 2026-09-01 に GitHub API で実測した最新 major:
@@ -59,8 +59,8 @@ jobs:
           PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release
           PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release --target x86_64-apple-darwin
           mkdir -p ../dist
-          cp target/release/paa-broker ../dist/paa-broker-darwin-arm64
-          cp target/x86_64-apple-darwin/release/paa-broker ../dist/paa-broker-darwin-x64
+          cp target/release/atn-broker ../dist/atn-broker-darwin-arm64
+          cp target/x86_64-apple-darwin/release/atn-broker ../dist/atn-broker-darwin-x64
 
       - uses: actions/upload-artifact@v7
         with:
@@ -78,7 +78,7 @@ jobs:
           key="$(cat registry.pub)"
           PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release
           mkdir -p ../dist
-          cp target/release/paa-broker ../dist/paa-broker-linux-x64
+          cp target/release/atn-broker ../dist/atn-broker-linux-x64
 
       - uses: actions/upload-artifact@v7
         with:
@@ -99,18 +99,18 @@ jobs:
       # ここで作らないと、どちらも「照合表が無い」として取得を諦める(壊れた binary は流れない)
       - name: SHA256SUMS
         working-directory: dist
-        run: sha256sum paa-mcp-* paa-darwin-* paa-linux-* paa-broker-* > SHA256SUMS
+        run: sha256sum atn-mcp-* atn-darwin-* atn-linux-* atn-broker-* > SHA256SUMS
 
       - uses: softprops/action-gh-release@v3
         with:
           files: |
-            dist/paa-mcp-darwin-arm64
-            dist/paa-mcp-darwin-x64
-            dist/paa-mcp-linux-x64
-            dist/paa-darwin-arm64
-            dist/paa-darwin-x64
-            dist/paa-linux-x64
-            dist/paa-broker-darwin-arm64
-            dist/paa-broker-darwin-x64
-            dist/paa-broker-linux-x64
+            dist/atn-mcp-darwin-arm64
+            dist/atn-mcp-darwin-x64
+            dist/atn-mcp-linux-x64
+            dist/atn-darwin-arm64
+            dist/atn-darwin-x64
+            dist/atn-linux-x64
+            dist/atn-broker-darwin-arm64
+            dist/atn-broker-darwin-x64
+            dist/atn-broker-linux-x64
             dist/SHA256SUMS

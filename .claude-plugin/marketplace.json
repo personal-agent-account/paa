@@ -1,16 +1,16 @@
 {
-  "name": "paa",
+  "name": "atn",
   "owner": {
     "name": "shibu003"
   },
   "metadata": {
-    "description": "Official runtime adapters for Personal Agent Account",
+    "description": "Official runtime adapters for All Together Now (a personal agent account)",
     "version": "0.2.0"
   },
   "plugins": [
     {
-      "name": "paa",
-      "description": "Attach Personal Agent Account to Claude Code (pairing via `paa pair claude`)",
+      "name": "atn",
+      "description": "Attach All Together Now to Claude Code (pairing via `atn pair claude`)",
       "source": "./adapters/official/claude"
     }
   ]

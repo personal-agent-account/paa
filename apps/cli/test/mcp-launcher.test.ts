@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { saveCredential } from "@paa/adapter";
 
-// PBI-0132 AC-6〜9 / X1 / X2: plugin が起動する launcher(`adapters/official/*/paa-mcp`)の分岐。
+// PBI-0132 AC-6〜9 / X1 / X2: plugin が起動する launcher(`adapters/official/*/atn-mcp`)の分岐。
 //
 // 静的な `.mcp.json` は「binary が在れば binary、無ければ bun」を分岐できないので sh を 1 枚挟む。
 // ここで見るのは **実際に起動して何が exec されたか** —— 「binary を優先する」を文字列 grep で
@@ -13,7 +13,7 @@ import { saveCredential } from "@paa/adapter";
 // 観測は fake の binary / bun が marker file に自分の argv と env を書く形(adopt.test.ts と同じ手)。
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const LAUNCHER = join(repoRoot, "adapters/official/claude/paa-mcp");
+const LAUNCHER = join(repoRoot, "adapters/official/claude/atn-mcp");
 const BUNDLE = join(repoRoot, "adapters/official/claude/mcp-server.bundle.js");
 const BUILD = join(repoRoot, "scripts/build-binaries.sh");
 
@@ -42,6 +42,10 @@ async function runLauncher(
     env: {
       PATH: `${withBun ? fakeBin : join(sandbox, "empty")}:/usr/bin:/bin`,
       HOME: join(sandbox, "home"),
+      // launcher の最後の枝は公開 Release から binary を取りに行く(PBI-0137)。
+      // 誰も listen していない port に向けて **network に出さない** —— 向けないと
+      // test が実物の 66MB を落として実 binary を exec してしまい、検査対象が変わる
+      PAA_BINARY_BASE_URL: "http://127.0.0.1:1",
       ...env,
     },
     stdout: "pipe",
@@ -74,7 +78,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
   test("AC-6: binary が在れば binary を exec する(bun を呼ばない)", async () => {
     const home = await mkdtemp(join(tmpdir(), "paa-launcher-home-"));
     await mkdir(join(home, "bin"), { recursive: true });
-    await putFake(join(home, "bin", "paa-mcp"), "binary");
+    await putFake(join(home, "bin", "atn-mcp"), "binary");
 
     const res = await runLauncher({ PAA_HOME: home });
     expect(res.exitCode).toBe(0);
@@ -86,7 +90,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
   test("AC-6: PAA_MCP_BINARY が PAA_HOME/bin より優先される", async () => {
     const home = await mkdtemp(join(tmpdir(), "paa-launcher-home-"));
     await mkdir(join(home, "bin"), { recursive: true });
-    await putFake(join(home, "bin", "paa-mcp"), "binary");
+    await putFake(join(home, "bin", "atn-mcp"), "binary");
     const explicit = join(sandbox, "explicit-mcp");
     await putFake(explicit, "explicit");
 
@@ -107,8 +111,8 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
   test("AC-7 攻撃: 実行権の無い binary は「在る」と数えず bun に落ちる", async () => {
     const home = await mkdtemp(join(tmpdir(), "paa-launcher-home-"));
     await mkdir(join(home, "bin"), { recursive: true });
-    await writeFile(join(home, "bin", "paa-mcp"), "#!/bin/sh\nexit 0\n");
-    await chmod(join(home, "bin", "paa-mcp"), 0o644);
+    await writeFile(join(home, "bin", "atn-mcp"), "#!/bin/sh\nexit 0\n");
+    await chmod(join(home, "bin", "atn-mcp"), 0o644);
 
     const res = await runLauncher({ PAA_HOME: home });
     expect(res.exitCode).toBe(0);
@@ -122,7 +126,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
     expect(res.exitCode).toBe(1);
     // MCP は stdio で JSON-RPC を流す面。1 byte でも混ぜたら handshake が壊れる
     expect(res.stdout).toBe("");
-    expect(res.stderr).toContain("~/.paa/bin/paa-mcp");
+    expect(res.stderr).toContain("~/.atn/bin/atn-mcp");
     expect(res.stderr).toContain("bun.sh/install");
     await rm(home, { recursive: true, force: true });
   }, 30_000);
@@ -130,7 +134,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
   test("AC-X1: env はそのまま透過し、launcher 自身は何も log しない", async () => {
     const home = await mkdtemp(join(tmpdir(), "paa-launcher-home-"));
     await mkdir(join(home, "bin"), { recursive: true });
-    await putFake(join(home, "bin", "paa-mcp"), "binary");
+    await putFake(join(home, "bin", "atn-mcp"), "binary");
 
     const res = await runLauncher({
       PAA_HOME: home,
@@ -160,8 +164,8 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
     const home = await mkdtemp(join(tmpdir(), "paa-launcher-home-"));
     await mkdir(join(home, "bin"), { recursive: true });
     // 実行権はあるが exec できない(interpreter が無い)= download が壊れた時の形
-    await writeFile(join(home, "bin", "paa-mcp"), "#!/nonexistent/interpreter\n");
-    await chmod(join(home, "bin", "paa-mcp"), 0o755);
+    await writeFile(join(home, "bin", "atn-mcp"), "#!/nonexistent/interpreter\n");
+    await chmod(join(home, "bin", "atn-mcp"), 0o755);
 
     const res = await runLauncher({ PAA_HOME: home });
     expect(res.exitCode).not.toBe(0);
@@ -172,7 +176,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
 });
 
 describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
-  test("--host-only で dist/paa-mcp と dist/paa ができ、どちらも実行可能", async () => {
+  test("--host-only で dist/atn-mcp と dist/paa ができ、どちらも実行可能", async () => {
     const out = await mkdtemp(join(tmpdir(), "paa-dist-"));
     const proc = Bun.spawn([BUILD, "--host-only", "--out", out], {
       cwd: repoRoot,
@@ -182,7 +186,7 @@ describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
     const stderr = await new Response(proc.stderr).text();
     expect({ code: await proc.exited, stderr }).toMatchObject({ code: 0 });
 
-    for (const name of ["paa-mcp", "paa"]) {
+    for (const name of ["atn-mcp", "paa"]) {
       const info = await stat(join(out, name));
       expect(info.isFile()).toBe(true);
       expect(info.mode & 0o111).toBeGreaterThan(0);
@@ -194,7 +198,7 @@ describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
     // 「binary ができた」だけでは、compile 済み実行ファイルが stdio の JSON-RPC を
     // 壊していないことの証拠にならない —— 壊れていても AC-9 は緑のままになる。
     const out = await mkdtemp(join(tmpdir(), "paa-dist-live-"));
-    const build = Bun.spawn([BUILD, "--host-only", "--out", out, "paa-mcp"], {
+    const build = Bun.spawn([BUILD, "--host-only", "--out", out, "atn-mcp"], {
       cwd: repoRoot,
       stdout: "pipe",
       stderr: "pipe",
@@ -231,7 +235,7 @@ describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
           PATH: `${join(sandbox, "empty")}:/usr/bin:/bin`,
           HOME: join(sandbox, "home"),
           PAA_HOME: home,
-          PAA_MCP_BINARY: join(out, "paa-mcp"),
+          PAA_MCP_BINARY: join(out, "atn-mcp"),
           PAA_RUNTIME_KIND: "claude",
         },
         stdin: "pipe",
@@ -262,7 +266,7 @@ describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line) as { id?: number; result?: any });
       expect({ stderr, replies: replies.length }).toMatchObject({ replies: 2 });
-      expect(replies.find((r) => r.id === 1)?.result?.serverInfo?.name).toBe("paa-account");
+      expect(replies.find((r) => r.id === 1)?.result?.serverInfo?.name).toBe("atn-account");
       expect(replies.find((r) => r.id === 2)?.result?.tools?.map((t: any) => t.name)).toContain(
         "whoami",
       );

@@ -33,7 +33,7 @@ describe("device key store", () => {
     const env = await tempEnv();
     const before = await getOrCreateDeviceKey("claude", env);
 
-    // paa install claude の再実行を模す: credential entry を丸ごと置換
+    // atn install claude の再実行を模す: credential entry を丸ごと置換
     await saveCredential("claude", cred("claude-2"), env);
     await saveCredential("claude", cred("claude-3"), env);
 

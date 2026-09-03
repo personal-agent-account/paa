@@ -16,17 +16,17 @@ const MAX_INSTRUCTION_BYTES: usize = 16 * 1024;
 const MAX_TURNS: &str = "40";
 
 /// dedicated session に載せる MCP server 名(runtime 側の登録名。install.ts の `MCP_SERVER_NAME`)。
-const MCP_SERVER_NAME: &str = "paa";
+const MCP_SERVER_NAME: &str = "atn";
 
 /// gemini の閉じ込め policy(PBI-0167)。**admin tier** に「paa MCP 以外は全部 deny」を置く。
-/// `toolName = "*"` + `mcpName = "paa"` は「その server の任意の tool」に一致する(bundle の
+/// `toolName = "*"` + `mcpName = "atn"` は「その server の任意の tool」に一致する(bundle の
 /// `ruleMatches` 実測: mcpName で server を絞ってから toolName の `*` を素通しする)。
 /// 最終 priority = tier base(admin = 5)+ priority/1000 なので、deny(5.000)< allow(5.900)。
 /// workspace tier(`<cwd>/.gemini/policies`)は 0.46.0 時点で**機能しない**(docs の警告)ため、
 /// session_dir に置いた file を `--admin-policy` で明示的に読ませる。
-const GEMINI_POLICY_TOML: &str = r#"# paa broker が dedicated session ごとに置く閉じ込め policy(PBI-0167)。
-# 通知本文は攻撃者が書ける入力なので、組込み tool(run_shell_command / write_file / …)は
-# 一切通さず、paa MCP の tool だけを通す。
+const GEMINI_POLICY_TOML: &str = r#"# Containment policy the atn broker writes for each dedicated session.
+# A notification body is attacker-controlled input, so no built-in tool
+# (run_shell_command / write_file / …) is allowed — only the atn MCP server's tools.
 [[rule]]
 toolName = "*"
 decision = "deny"
@@ -34,7 +34,7 @@ priority = 0
 
 [[rule]]
 toolName = "*"
-mcpName = "paa"
+mcpName = "atn"
 decision = "allow"
 priority = 900
 "#;
@@ -94,24 +94,24 @@ pub fn containment_env() -> ContainmentEnv {
 }
 
 /// claude の paa MCP server の定義を抜き、`--mcp-config` に渡せる JSON にする。
-/// 探す順序は ① user config(`.claude.json` の `mcpServers.paa` = `paa install claude` 経路)
+/// 探す順序は ① user config(`.claude.json` の `mcpServers.paa` = `atn install claude` 経路)
 /// → ② plugin 台帳(`installed_plugins.json` → `<installPath>/.mcp.json` = **plugin-first** 経路。
 /// 図10 / 配布戦略 §7.1)。どちらでも見つからなければ `containment_unavailable` —— **user settings を
-/// 落とすと MCP 登録ごと消える**(実測 2026-09-02: `--setting-sources project` で `paa` が tool 一覧から
+/// 落とすと MCP 登録ごと消える**(実測 2026-09-02: `--setting-sources project` で `atn` が tool 一覧から
 /// 消える)ので、定義を複製できないなら「閉じ込めたまま仕事ができる session」を作れない。
 /// 閉じ込めを緩めて起こす選択はしない(便利さより「mail 1 通で shell」を塞ぐ)。
 ///
 /// ② を見るのは、plugin で入れた人の `.claude.json` に `mcpServers.paa` が**無い**ため
 /// (実測 2026-09-02: 同じ機で plugin 由来の fakechat server は top-level `mcpServers` に無く、
-/// `paa install claude` で入れた paa だけが在る)。① だけだと plugin-first の user は
+/// `atn install claude` で入れた paa だけが在る)。① だけだと plugin-first の user は
 /// 全 dedicated session が fail-closed になり、AUTO が dispatch_skip の log 1 行だけ残して止まる。
 fn claude_mcp_config(config_path: &Path, plugin_registry: &Path) -> Result<String, String> {
     let server = claude_user_mcp_server(config_path)
         .or_else(|| claude_plugin_mcp_server(plugin_registry))
         .ok_or_else(|| {
             eprintln!(
-                "broker: paa MCP の定義が見つからない(user config {config_path:?} にも \
-                 plugin 台帳 {plugin_registry:?} にも)。閉じ込めたまま起こせないので起こさない"
+                "broker: the atn MCP server definition was not found (neither in the user config {config_path:?} \
+                 nor in the plugin registry {plugin_registry:?}). Cannot start it contained, so not starting it"
             );
             "containment_unavailable".to_string()
         })?;
@@ -121,10 +121,10 @@ fn claude_mcp_config(config_path: &Path, plugin_registry: &Path) -> Result<Strin
 /// ①: `.claude.json`(`claude mcp add -s user` が書く場所)の `mcpServers.paa`。
 fn claude_user_mcp_server(config_path: &Path) -> Option<serde_json::Value> {
     let text = fs::read_to_string(config_path)
-        .map_err(|e| eprintln!("broker: claude config を読めない ({config_path:?}): {e}"))
+        .map_err(|e| eprintln!("broker: cannot read the claude config ({config_path:?}): {e}"))
         .ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| eprintln!("broker: claude config が JSON として壊れている ({config_path:?}): {e}"))
+        .map_err(|e| eprintln!("broker: the claude config is not valid JSON ({config_path:?}): {e}"))
         .ok()?;
     parsed.get("mcpServers")?.get(MCP_SERVER_NAME).cloned()
 }
@@ -137,7 +137,7 @@ fn claude_user_mcp_server(config_path: &Path) -> Option<serde_json::Value> {
 fn claude_plugin_mcp_server(registry_path: &Path) -> Option<serde_json::Value> {
     let text = fs::read_to_string(registry_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| eprintln!("broker: claude plugin 台帳が壊れている ({registry_path:?}): {e}"))
+        .map_err(|e| eprintln!("broker: the claude plugin registry is broken ({registry_path:?}): {e}"))
         .ok()?;
     let plugins = parsed.get("plugins")?.as_object()?;
     let mut candidates: Vec<&serde_json::Value> = plugins
@@ -208,13 +208,13 @@ fn codex_disabled_mcp_servers(config_path: &Path) -> Result<Vec<String>, String>
                 continue;
             }
             let Some(name) = parts.next().map(str::trim) else {
-                eprintln!("broker: codex config の [mcp_servers] を server 名まで読めない ({config_path:?})");
+                eprintln!("broker: cannot read the server names under [mcp_servers] in the codex config ({config_path:?})");
                 return Err("containment_unavailable".to_string());
             };
             if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
                 // quoted key(`["mcp_servers"."x y"]`)等。`-c` の key に安全に埋められない
                 // = 落とし切れないので起こさない。
-                eprintln!("broker: codex config の MCP server 名が想定外 ({name:?} in {config_path:?})");
+                eprintln!("broker: unexpected MCP server name in the codex config ({name:?} in {config_path:?})");
                 return Err("containment_unavailable".to_string());
             }
             if name != MCP_SERVER_NAME && !names.iter().any(|n| n == name) {
@@ -224,7 +224,7 @@ fn codex_disabled_mcp_servers(config_path: &Path) -> Result<Vec<String>, String>
         }
         if line.starts_with("mcp_servers") {
             // inline table(`mcp_servers = { github = { … } }`)は行単位では名前を取り切れない。
-            eprintln!("broker: codex config の mcp_servers が inline table ({config_path:?})。落とし切れないので起こさない");
+            eprintln!("broker: mcp_servers in the codex config is an inline table ({config_path:?}); cannot strip it safely, so not starting");
             return Err("containment_unavailable".to_string());
         }
     }
@@ -267,7 +267,7 @@ pub fn dedicated_launch(
     match runtime {
         // 実測 C(PBI-0019)+ 実測 E(PBI-0167, 2026-09-02, Claude Code 2.1.258):
         //   claude -p <instruction> --tools "" --setting-sources project --strict-mcp-config
-        //          --mcp-config <dir>/paa-mcp.json --permission-mode dontAsk --allowedTools mcp__paa
+        //          --mcp-config <dir>/atn-mcp.json --permission-mode dontAsk --allowedTools mcp__paa
         //          --output-format json --max-turns 40
         //
         // `--allowedTools mcp__paa` **だけでは Bash が通る**(実測 E: `--permission-mode dontAsk` は
@@ -280,7 +280,7 @@ pub fn dedicated_launch(
         // "MCP config file not found: .../mcp" に化けた)。
         "claude" => {
             let mcp_config = claude_mcp_config(&env.claude_config, &env.claude_plugin_registry)?;
-            let rel = "paa-mcp.json";
+            let rel = "atn-mcp.json";
             Ok((
                 argv(&[
                     "-p",
@@ -295,7 +295,7 @@ pub fn dedicated_launch(
                     "--permission-mode",
                     "dontAsk",
                     "--allowedTools",
-                    "mcp__paa",
+                    "mcp__atn",
                     "--output-format",
                     "json",
                     "--max-turns",
@@ -343,8 +343,8 @@ pub fn dedicated_launch(
         "gemini" => {
             if let Some(dir) = env.gemini_admin_dirs.iter().find(|d| has_toml(d)) {
                 eprintln!(
-                    "broker: gemini の標準 admin policy dir に .toml が在る ({dir:?}) ため \
-                     --admin-policy が無視される。閉じ込められないので起こさない"
+                    "broker: a .toml exists in gemini's standard admin policy dir ({dir:?}), so \
+                     --admin-policy would be ignored. Cannot contain the session, so not starting"
                 );
                 return Err("containment_unavailable".to_string());
             }
@@ -357,7 +357,7 @@ pub fn dedicated_launch(
                     "yolo",
                     "--skip-trust",
                     "--allowed-mcp-server-names",
-                    "paa",
+                    "atn",
                     "--admin-policy",
                     &format!("{session_dir}/policies"),
                     "-o",
@@ -380,13 +380,13 @@ fn is_safe_request_id(request_id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// `$PAA_BROKER_HOME`(default `~/.paa/broker`)。sessions/<requestId>/ と registry cache の親。
+/// `$PAA_BROKER_HOME`(default `~/.atn/broker`)。sessions/<requestId>/ と registry cache の親。
 pub fn broker_home() -> PathBuf {
     if let Ok(dir) = std::env::var("PAA_BROKER_HOME") {
         return PathBuf::from(dir);
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".paa").join("broker")
+    PathBuf::from(home).join(".atn").join("broker")
 }
 
 /// spawn する program。scan で見つかった path があればそれ(PATH に無い brew / npm の binary も
@@ -487,11 +487,11 @@ pub fn launch_with_scope(
         // reason は AC-11 が literal 'session_dir_failed' を期待する(OBSERVE の grep 対象でもある)。
         // 詳細は eprintln へ逃がし、返す reason は bare token に保つ。
         let stdout = fs::File::create(format!("{dir}/stdout.log")).map_err(|e| {
-            eprintln!("broker: session_dir stdout.log 作成失敗: {e}");
+            eprintln!("broker: could not create session_dir stdout.log: {e}");
             "session_dir_failed".to_string()
         })?;
         let stderr = fs::File::create(format!("{dir}/stderr.log")).map_err(|e| {
-            eprintln!("broker: session_dir stderr.log 作成失敗: {e}");
+            eprintln!("broker: could not create session_dir stderr.log: {e}");
             "session_dir_failed".to_string()
         })?;
         cmd.stdout(stdout);
@@ -518,8 +518,8 @@ pub fn launch(
 
 /// 外部 API provider の runtime(`kind: "api"`。PBI-0070 / EP-0009 C)を起こす。
 ///
-/// 実体は端末側の `paa agent <provider> --thread <id>`(PBI-0057) —— 端末に binary は無いので
-/// `resolve_program`(scan の path)ではなく **`PAA_CLI` の argv** で起こす(`paa adopt` と同じ解決)。
+/// 実体は端末側の `atn agent <provider> --thread <id>`(PBI-0057) —— 端末に binary は無いので
+/// `resolve_program`(scan の path)ではなく **`PAA_CLI` の argv** で起こす(`atn adopt` と同じ解決)。
 /// runtime id は `<provider>-api` の規約で、provider 名はその接頭辞。
 ///
 /// 判定順序: unknown_runtime / not_launchable(registry。Cloud から来た名前を先に潰す)→
@@ -606,12 +606,12 @@ pub fn launch_session_scoped_in(
     }
     let session_dir = home.join("sessions").join(request_id);
     fs::create_dir_all(&session_dir).map_err(|e| {
-        eprintln!("broker: session_dir mkdir 失敗 ({session_dir:?}): {e}");
+        eprintln!("broker: session_dir mkdir failed ({session_dir:?}): {e}");
         "session_dir_failed".to_string()
     })?;
     let dir_str = session_dir.to_string_lossy().to_string();
     fs::write(session_dir.join("instruction.txt"), instruction).map_err(|e| {
-        eprintln!("broker: instruction.txt 書込失敗: {e}");
+        eprintln!("broker: could not write instruction.txt: {e}");
         "session_dir_failed".to_string()
     })?;
     check_launchable(registry, runtime)?;
@@ -622,12 +622,12 @@ pub fn launch_session_scoped_in(
         let path = session_dir.join(rel);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                eprintln!("broker: 閉じ込め file の dir 作成失敗 ({parent:?}): {e}");
+                eprintln!("broker: could not create the dir for a containment file ({parent:?}): {e}");
                 "session_dir_failed".to_string()
             })?;
         }
         fs::write(&path, content).map_err(|e| {
-            eprintln!("broker: 閉じ込め file の書込失敗 ({path:?}): {e}");
+            eprintln!("broker: could not write a containment file ({path:?}): {e}");
             "session_dir_failed".to_string()
         })?;
     }
@@ -668,7 +668,7 @@ mod tests {
     #[tokio::test]
     async fn name_in_allowlist_but_missing_binary_returns_spawn_error() {
         // allowlist は通るが、そんな名前の実行可能ファイルは存在しない
-        let name = "paa-broker-definitely-not-a-real-binary";
+        let name = "atn-broker-definitely-not-a-real-binary";
         let result = launch_with_allowlist(name, name, &[], &allow(&[name]), None);
         assert!(result.is_err());
         assert_ne!(result.err(), Some("unknown_runtime".to_string()));
@@ -681,7 +681,7 @@ mod tests {
 
     #[tokio::test]
     async fn dedicated_session_runs_in_session_dir() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-cwd-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-cwd-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let dir_str = dir.to_string_lossy().to_string();
@@ -713,7 +713,7 @@ mod tests {
     // 載せない(Manual / AUTO / owner lane が従来どおり全権であることの片側確認)。
     #[tokio::test]
     async fn scoped_session_passes_env_and_unscoped_leaves_it_unset() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-scope-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-scope-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let dir_str = dir.to_string_lossy().to_string();
@@ -765,7 +765,7 @@ mod tests {
     #[tokio::test]
     async fn registry_added_runtime_launches_by_found_path() {
         let reg = reg_with_ollama();
-        let dir = std::env::temp_dir().join(format!("paa-broker-launch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-launch-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("ran");
@@ -803,12 +803,12 @@ mod tests {
 
     /// paa MCP が登録済みの claude user config と、admin policy の無い gemini を模した env。
     fn test_env() -> ContainmentEnv {
-        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-cenv-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let config = dir.join(".claude.json");
         fs::write(
             &config,
-            r#"{"mcpServers":{"paa":{"type":"stdio","command":"bun","args":["/x/server.ts"],
+            r#"{"mcpServers":{"atn":{"type":"stdio","command":"bun","args":["/x/server.ts"],
                "env":{"PAA_RUNTIME_KIND":"claude","PAA_URL":"http://localhost:8787"}},
                "other":{"command":"other"}}}"#,
         )
@@ -821,7 +821,7 @@ mod tests {
             "model = \"gpt-5\"\n\n[mcp_servers.playwright]\ncommand = \"npx\"\n\n\
              [mcp_servers.playwright.tools.browser_click]\nenabled = true\n\n\
              # [mcp_servers.commented-out]\n\
-             [mcp_servers.paa]\ncommand = \"bun\"\n\n[mcp_servers.obsidian]\ncommand = \"uvx\"\n",
+             [mcp_servers.atn]\ncommand = \"bun\"\n\n[mcp_servers.obsidian]\ncommand = \"uvx\"\n",
         )
         .unwrap();
         ContainmentEnv {
@@ -846,11 +846,11 @@ mod tests {
                 "project",
                 "--strict-mcp-config",
                 "--mcp-config",
-                "/tmp/sess/paa-mcp.json",
+                "/tmp/sess/atn-mcp.json",
                 "--permission-mode",
                 "dontAsk",
                 "--allowedTools",
-                "mcp__paa",
+                "mcp__atn",
                 "--output-format",
                 "json",
                 "--max-turns",
@@ -874,9 +874,9 @@ mod tests {
         }
         // user settings を落とすと MCP 登録ごと消えるので、paa の定義を session_dir に複製する
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, "paa-mcp.json");
+        assert_eq!(files[0].0, "atn-mcp.json");
         let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
-        assert_eq!(cfg["mcpServers"]["paa"]["command"], "bun");
+        assert_eq!(cfg["mcpServers"]["atn"]["command"], "bun");
         assert!(cfg["mcpServers"].get("other").is_none(), "paa 以外の MCP まで持ち込まない");
     }
 
@@ -884,7 +884,7 @@ mod tests {
     // 起こす(user settings を読ませる)選択はしない。
     #[test]
     fn dedicated_launch_claude_without_paa_mcp_is_containment_unavailable() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-none-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-cenv-none-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let no_plugin = dir.join("no-such-plugins.json");
         let missing = ContainmentEnv {
@@ -919,7 +919,7 @@ mod tests {
     // ② plugin 台帳 → `<installPath>/.mcp.json` を複製元にし、`${CLAUDE_PLUGIN_ROOT}` を畳む。
     #[test]
     fn dedicated_launch_claude_falls_back_to_plugin_mcp_config() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-cenv-plugin-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-cenv-plugin-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         // local scope の install は壊れた plugin dir を指す(user scope が先に選ばれることの確認)
         let local_root = dir.join("cache/paa/local");
@@ -927,7 +927,7 @@ mod tests {
         fs::create_dir_all(&user_root).unwrap();
         fs::write(
             user_root.join(".mcp.json"),
-            r#"{"mcpServers":{"paa":{"command":"${CLAUDE_PLUGIN_ROOT}/paa-mcp",
+            r#"{"mcpServers":{"atn":{"command":"${CLAUDE_PLUGIN_ROOT}/atn-mcp",
                "args":["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"],
                "env":{"PAA_RUNTIME_KIND":"claude"}}}}"#,
         )
@@ -938,7 +938,7 @@ mod tests {
             format!(
                 r#"{{"version":2,"plugins":{{
                    "other@mkt":[{{"scope":"user","installPath":"{other}"}}],
-                   "paa@paa-marketplace":[
+                   "atn@atn-marketplace":[
                      {{"scope":"local","installPath":"{local}"}},
                      {{"scope":"user","installPath":"{user}"}}]}}}}"#,
                 other = dir.join("cache/other").display(),
@@ -961,9 +961,9 @@ mod tests {
         let (_, files) = dedicated_launch("claude", "I", "/tmp/sess", &env).expect("起こせること");
         let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
         let root = user_root.display().to_string();
-        assert_eq!(cfg["mcpServers"]["paa"]["command"], format!("{root}/paa-mcp"));
-        assert_eq!(cfg["mcpServers"]["paa"]["args"][0], format!("{root}/mcp-server.bundle.js"));
-        assert_eq!(cfg["mcpServers"]["paa"]["env"]["PAA_RUNTIME_KIND"], "claude");
+        assert_eq!(cfg["mcpServers"]["atn"]["command"], format!("{root}/atn-mcp"));
+        assert_eq!(cfg["mcpServers"]["atn"]["args"][0], format!("{root}/mcp-server.bundle.js"));
+        assert_eq!(cfg["mcpServers"]["atn"]["env"]["PAA_RUNTIME_KIND"], "claude");
         assert!(
             !files[0].1.contains("CLAUDE_PLUGIN_ROOT"),
             "変数が畳まれずに残ると command が見つからず、閉じ込めただけの丸腰 session になる: {}",
@@ -972,12 +972,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    // ① が有る時は ① を使う(plugin 台帳より user 登録が優先。`paa install claude` した人の実態)。
+    // ① が有る時は ① を使う(plugin 台帳より user 登録が優先。`atn install claude` した人の実態)。
     #[test]
     fn dedicated_launch_claude_prefers_user_config_over_plugin() {
         let (_, files) = dedicated_launch("claude", "I", "/tmp/sess", &test_env()).unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
-        assert_eq!(cfg["mcpServers"]["paa"]["command"], "bun");
+        assert_eq!(cfg["mcpServers"]["atn"]["command"], "bun");
     }
 
     // AC-3: codex は既定に頼らず `--sandbox read-only` を明示する(既定は user の
@@ -1008,7 +1008,7 @@ mod tests {
         let sandbox = args.iter().position(|a| a == "--sandbox").expect("--sandbox が無い");
         assert_eq!(args[sandbox + 1], "read-only");
         // paa 自身は落とさない(落とすと閉じ込めただけで何も出来ない session になる)
-        assert!(!args.iter().any(|a| a == "mcp_servers.paa.enabled=false"));
+        assert!(!args.iter().any(|a| a == "mcp_servers.atn.enabled=false"));
         // instruction は最後(可変長の `-c` の直後に positional を置かない)
         assert_eq!(args.last().unwrap(), "INSTR");
     }
@@ -1017,7 +1017,7 @@ mod tests {
     // 名前を取り切れない config は「server 無し」ではなく **判定不能**として起こさない。
     #[test]
     fn dedicated_launch_codex_with_unreadable_mcp_names_is_containment_unavailable() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-codex-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-codex-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let env_with = |file: &str, body: &str| {
             let path = dir.join(file);
@@ -1070,7 +1070,7 @@ mod tests {
                 "yolo",
                 "--skip-trust",
                 "--allowed-mcp-server-names",
-                "paa",
+                "atn",
                 "--admin-policy",
                 "/tmp/sess/policies",
                 "-o",
@@ -1083,14 +1083,14 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].0, "policies/paa-containment.toml");
         assert!(files[0].1.contains("decision = \"deny\""), "{}", files[0].1);
-        assert!(files[0].1.contains("mcpName = \"paa\""), "{}", files[0].1);
+        assert!(files[0].1.contains("mcpName = \"atn\""), "{}", files[0].1);
     }
 
     // AC-4(gemini 側): 標準 admin policy dir に .toml が在ると --admin-policy は無視される
     // (gemini の security guard)= 閉じ込められないので起こさない。
     #[test]
     fn dedicated_launch_gemini_with_system_policy_is_containment_unavailable() {
-        let dir = std::env::temp_dir().join(format!("paa-broker-admin-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atn-broker-admin-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("corp.toml"), "").unwrap();
@@ -1127,7 +1127,7 @@ mod tests {
     // registry で足した runtime を AUTO で起こそうとしても bare spawn にはならない(dedicated_unsupported)
     #[test]
     fn launch_session_refuses_runtime_without_dedicated_argv() {
-        let tmp = std::env::temp_dir().join(format!("paa-broker-ded-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("atn-broker-ded-{}", std::process::id()));
         let result = launch_session_scoped_in(&tmp, &reg_with_ollama(), &[], "superagent", "instr", "req-ded", None, &test_env());
         assert_eq!(result.err(), Some("dedicated_unsupported".to_string()));
         let _ = fs::remove_dir_all(&tmp);
@@ -1152,7 +1152,7 @@ mod tests {
         // 落ちることで「長さ判定は通った」ことだけを確認する(実 CLI は spawn しない)。
         let at_limit = "x".repeat(MAX_INSTRUCTION_BYTES);
         // request_id を安全な値にし、broker home を temp に向ける(env は触らない)
-        let tmp = std::env::temp_dir().join(format!("paa-broker-limit-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("atn-broker-limit-{}", std::process::id()));
         let result =
             launch_session_scoped_in(&tmp, &registry::builtin(), &[], "not-a-real-runtime", &at_limit, "req-limit", None, &test_env());
         // instruction_too_long ではないこと(registry で弾かれるのが正しい)
@@ -1188,7 +1188,7 @@ mod tests {
         // 6引数化で一度落ちたので PBI-0040 で復元): 成功経路では session_dir に instruction.txt が
         // 中身ごと残る。runtime は registry 外のダミー名 —— 万一 dir 判定をすり抜けても実 CLI に
         // 到達しない。
-        let home = std::env::temp_dir().join(format!("paa-broker-instr-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("atn-broker-instr-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         let result =
             launch_session_scoped_in(&home, &registry::builtin(), &[], "not-a-real-runtime", "INSTR", "req-ok", None, &test_env());
@@ -1202,7 +1202,7 @@ mod tests {
 
         // 後半: session_dir が作れない状況(broker home が既存の通常ファイル)では session_dir_failed。
         // runtime は registry 外のダミー名 —— 万一 dir 判定をすり抜けても実 CLI に到達しない。
-        let tmp_file = std::env::temp_dir().join(format!("paa-broker-file-{}", std::process::id()));
+        let tmp_file = std::env::temp_dir().join(format!("atn-broker-file-{}", std::process::id()));
         fs::write(&tmp_file, "not a dir").unwrap();
         let result =
             launch_session_scoped_in(&tmp_file, &registry::builtin(), &[], "not-a-real-runtime", "instr", "req-dir", None, &test_env());

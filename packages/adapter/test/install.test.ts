@@ -73,22 +73,22 @@ describe("doctor", () => {
     const findings = await doctorRuntime({ adapter: fakeAdapter, ctx, env });
     const credential = findings.find((f) => f.label === "credential")!;
     expect(credential.ok).toBe(false);
-    expect(credential.detail).toContain("bun run paa install claude");
+    expect(credential.detail).toContain("atn install claude");
   });
 
   test("credential が有効なら全て OK", async () => {
     revoked = false;
     const findings = await doctorRuntime({ adapter: fakeAdapter, ctx, env: await envWithCredential() });
     expect(findings.every((f) => f.ok)).toBe(true);
-    expect(findings.map((f) => f.label)).toContain("Account 接続");
+    expect(findings.map((f) => f.label)).toContain("Account connection");
   });
 
   test("revoke 済み credential は失効として検出し再 pair を促す(要件 §15.3)", async () => {
     revoked = true;
     const findings = await doctorRuntime({ adapter: fakeAdapter, ctx, env: await envWithCredential() });
-    const connection = findings.find((f) => f.label === "Account 接続")!;
+    const connection = findings.find((f) => f.label === "Account connection")!;
     expect(connection.ok).toBe(false);
-    expect(connection.detail).toContain("失効");
+    expect(connection.detail).toContain("revoked");
     revoked = false;
   });
 });

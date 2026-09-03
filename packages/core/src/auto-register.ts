@@ -1,4 +1,4 @@
-// runtime 自動登録(PBI-0023 / REQ-19)の materialize 面 —— `paa adopt`(apps/cli)が stderr 1 行目に
+// runtime 自動登録(PBI-0023 / REQ-19)の materialize 面 —— `atn adopt`(apps/cli)が stderr 1 行目に
 // 出す reason 文字列と、それを受けた server(apps/server/src/auto-register.ts)が register_ack.detail
 // と比較する文字列は、broker(Rust)が 2 プロセスの間をそのまま素通しする契約でしか成立しない
 // (broker は stderr の 1 行目を切り出して運ぶだけで、意味は解釈しない)。

@@ -33,7 +33,7 @@ export const codexAdapter: RuntimeAdapter = withSkills(
     id: "codex",
     displayName: "Codex",
     bin: "codex",
-    installHint: "codex CLI が見つかりません (npm i -g @openai/codex)",
+    installHint: "codex CLI was not found (npm i -g @openai/codex)",
     configPath,
     format: "toml",
     serversKey: "mcp_servers",

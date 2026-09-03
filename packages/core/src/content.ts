@@ -32,11 +32,19 @@ export function isEmptyContent(c: MessageContent): boolean {
   );
 }
 
-/** envelope の中に seal する平文の形(PBI-0006)。text/files/urls をそのまま JSON にするだけ */
+/**
+ * envelope の中に seal する平文の形(PBI-0006)。text/files/urls をそのまま JSON にするだけ。
+ * capture 通知(webhook の L2 seal・android/windows collector の L1 seal)は同じ envelope に
+ * `{title, body, url}` を seal する(server は title/body を見ない・受け側だけがこの形を知る)。
+ * MessageContent には専用 field を足さず、fromEnvelopePlaintext が text/urls に畳む(PBI-0153)
+ */
 export interface EnvelopePlaintext {
   text?: string;
   files?: FileRef[];
   urls?: string[];
+  title?: string;
+  body?: string;
+  url?: string;
 }
 
 export function toEnvelopePlaintext(c: MessageContent): EnvelopePlaintext {
@@ -47,11 +55,38 @@ export function toEnvelopePlaintext(c: MessageContent): EnvelopePlaintext {
   return p;
 }
 
+/** 中身のある文字列だけを通す。envelope 平文は L1 collector(client)が任意に組める = 型を信じない */
+function plainString(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() !== "" ? v : undefined;
+}
+
+/**
+ * href として描画してよい URL か(順70 review)。thread は urls と file の外部 ref を
+ * そのまま `<a href>` にするので、`javascript:` / `data:` を link にしない。envelope 平文は
+ * L1 collector が、平文 content は送信側が任意に組めるため、復号側と描画側の両方で通す
+ */
+export function isRenderableUrl(u: unknown): u is string {
+  return typeof u === "string" && /^(?:https?|mailto):/i.test(u);
+}
+
 export function fromEnvelopePlaintext(p: EnvelopePlaintext): MessageContent {
   const c: MessageContent = {};
-  if (p.text !== undefined) c.text = p.text;
-  if (p.files !== undefined) c.files = p.files;
-  if (p.urls !== undefined) c.urls = p.urls;
+  // title/body(捕捉通知の形)は text に畳む — 1 行目 = title、2 行目以降 = body(PBI-0153)。
+  // collector は Full text mode で title 空・body だけの平文も送る(CollectorService.kt /
+  // ListenerService.cs)ので、片方だけでも text にする(順70 review 破れ 1)
+  const title = plainString(p.title);
+  const body = plainString(p.body);
+  if (title !== undefined || body !== undefined) {
+    c.text = title !== undefined && body !== undefined ? `${title}\n${body}` : (title ?? body)!;
+  } else if (typeof p.text === "string") {
+    c.text = p.text;
+  }
+  const files = (Array.isArray(p.files) ? p.files : []).filter(
+    (f): f is FileRef => !!f && typeof f.name === "string" && typeof f.ref === "string",
+  );
+  if (files.length > 0) c.files = files;
+  const urls = [...(Array.isArray(p.urls) ? p.urls : []), p.url].filter(isRenderableUrl);
+  if (urls.length > 0) c.urls = urls;
   return c;
 }
 

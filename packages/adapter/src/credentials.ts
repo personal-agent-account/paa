@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 // per-actor read state(§23.1)が 1 actor に潰れる。
 //
 // 書き込みは「1 file に複数 kind の map」なので read-modify-write になる。
-// `paa install claude` と `paa install codex` は同時に走りうるため、load〜write を
+// `atn install claude` と `atn install codex` は同時に走りうるため、load〜write を
 // lock file で直列化し、temp file 名はプロセス固有にする(共有 temp 名だと後発の
 // rename が ENOENT で落ち、先発の内容も失われる)。
 
@@ -34,7 +34,7 @@ const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
 
 export function paaHome(env: Env = process.env): string {
-  return env.PAA_HOME ?? join(homedir(), ".paa");
+  return env.PAA_HOME ?? join(homedir(), ".atn");
 }
 
 export function credentialsPath(env: Env = process.env): string {
@@ -107,8 +107,8 @@ async function withCredentialLock<T>(env: Env, fn: () => Promise<T>): Promise<T>
       }
       if (Date.now() > deadline) {
         throw new Error(
-          `credential store が別プロセスに使用されています: ${lockPath}\n` +
-            "他の 'paa install' が終わるのを待つか、残っていれば削除してください",
+          `The credential store is in use by another process: ${lockPath}\n` +
+            "Wait for the other 'atn install' to finish, or delete the lock if it is stale",
         );
       }
       await new Promise((r) => setTimeout(r, 20 + Math.floor(Math.random() * 40)));

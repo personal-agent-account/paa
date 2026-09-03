@@ -93,7 +93,7 @@ describe("codexAdapter — kind=skill(W20 / PBI-0091)", () => {
         spec: { description: "D", instructions: "x" },
         env: {},
       }),
-    ).rejects.toThrow(/不正なパス/);
+    ).rejects.toThrow(/invalid path/);
     expect((await readdir(join(home, ".codex"))).sort()).toEqual(before);
   });
 

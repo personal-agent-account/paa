@@ -5,15 +5,15 @@ import { paaHome } from "./credentials.ts";
 // 単体実行ファイルの取得(PBI-0137)。PBI-0132 が「置いてあれば bun を使わない」を作ったので、
 // ここが「置いてある状態を配布で作る」を担う —— ここまでで end user の bun 依存が 0 になる。
 //
-// 置き場は credential と同じ PAA_HOME(`~/.paa/bin`)。**公開 Release からの取得だけ**を扱い、
+// 置き場は credential と同じ PAA_HOME(`~/.atn/bin`)。**公開 Release からの取得だけ**を扱い、
 // token を要求しない(要求する配布物なら、それは私的な binary なので手で置く方が正しい)。
 //
-// 同じ取得は launcher(`packages/mcp/paa-mcp`)にも sh で在る —— bun も binary も無い環境では
+// 同じ取得は launcher(`packages/mcp/atn-mcp`)にも sh で在る —— bun も binary も無い環境では
 // TypeScript を動かす手段自体が無いため。URL の形・checksum の必須・tmp → rename は
 // 両方で同じ(diagrams-check の PBI-0137 規則が version と URL の形を両側で固定する)。
 
 /** Release の tag。`v${PAA_BINARY_VERSION}` が tag 名になる(plugin.json の version と一致させる) */
-export const PAA_BINARY_VERSION = "0.1.1";
+export const PAA_BINARY_VERSION = "0.2.0";
 
 /** 公開 Release の置き場。private な mirror へ向けたい時は `PAA_BINARY_BASE_URL` で差し替える */
 export const DEFAULT_BINARY_BASE_URL =
@@ -67,14 +67,14 @@ function sha256From(sums: string, asset: string): string | undefined {
 }
 
 /**
- * `~/.paa/bin/<name>` を「公開 Release から取ってきて置く」まで面倒を見る。
+ * `~/.atn/bin/<name>` を「公開 Release から取ってきて置く」まで面倒を見る。
  *
  * 失敗は**全部 fallback**(bun 経路)に倒す —— ここで throw すると、network が無いだけで
- * `paa install` そのものが失敗し、従来どおり動くはずの人まで止めてしまう。
+ * `atn install` そのものが失敗し、従来どおり動くはずの人まで止めてしまう。
  * ただし checksum 不一致だけは黙って落とさない(壊れた / すり替えられた binary を使わせない)。
  */
 export async function ensureBinary(
-  name: "paa-mcp" | "paa" | "paa-broker",
+  name: "atn-mcp" | "atn" | "atn-broker",
   options: EnsureBinaryOptions = {},
 ): Promise<EnsureBinaryOutcome> {
   const env = options.env ?? process.env;
@@ -98,7 +98,7 @@ export async function ensureBinary(
   if (!target) {
     return {
       status: "unsupported",
-      detail: `${options.platform ?? process.platform}/${options.arch ?? process.arch} 向けの binary は配っていません`,
+      detail: `no prebuilt binary is published for ${options.platform ?? process.platform}/${options.arch ?? process.arch}`,
     };
   }
 
@@ -109,12 +109,12 @@ export async function ensureBinary(
   try {
     // checksum を**先に**取る: 66MB を引いてから「照合表が無い」と分かるのは無駄
     const sums = await doFetch(`${dirUrl}/SHA256SUMS`);
-    if (!sums.ok) return { status: "unavailable", detail: `SHA256SUMS が ${sums.status}` };
+    if (!sums.ok) return { status: "unavailable", detail: `SHA256SUMS returned ${sums.status}` };
     want = sha256From(await sums.text(), asset);
-    if (!want) return { status: "unavailable", detail: `SHA256SUMS に ${asset} がありません` };
+    if (!want) return { status: "unavailable", detail: `${asset} is not listed in SHA256SUMS` };
 
     const res = await doFetch(`${dirUrl}/${asset}`);
-    if (!res.ok) return { status: "unavailable", detail: `${asset} が ${res.status}` };
+    if (!res.ok) return { status: "unavailable", detail: `${asset} returned ${res.status}` };
     bytes = new Uint8Array(await res.arrayBuffer());
   } catch (e) {
     return { status: "unavailable", detail: (e as Error).message };
@@ -124,7 +124,7 @@ export async function ensureBinary(
   if (got !== want) {
     return {
       status: "checksum_mismatch",
-      detail: `${asset} の SHA256 が一致しません(期待 ${want.slice(0, 12)}… / 実際 ${got.slice(0, 12)}…)`,
+      detail: `SHA256 mismatch for ${asset} (expected ${want.slice(0, 12)}… / got ${got.slice(0, 12)}…)`,
     };
   }
 

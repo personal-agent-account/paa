@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/contract.ts";
 
-// run() の PATH 補強(PBI-0050 AC-1): launchd が `paa broker` を最小 PATH で起こした時も、
+// run() の PATH 補強(PBI-0050 AC-1): launchd が `atn broker` を最小 PATH で起こした時も、
 // adopt → adapter.register → run() がユーザーの install 先(~/.local/bin 等)の runtime CLI を
 // 解決できることを固定する。broker の discovery default_bin_dirs と同じ dir を見る。
 
@@ -44,7 +44,7 @@ describe("run() の PATH 補強 (PBI-0050)", () => {
     // 補強が効いたままだと実 /usr/local/bin の claude を拾う環境でも、空文字なら補強 dir は
     // 1 つも見ずに「見つかりません」で落ちる — 「CLI 無し」の test が実機に依存しないことの固定
     const env = { ...launchdEnv(), PAA_EXTRA_PATH_DIRS: "" };
-    expect(() => run({ env }, ["claude", "--version"])).toThrow(/claude が見つかりません/);
+    expect(() => run({ env }, ["claude", "--version"])).toThrow(/claude was not found/);
   });
 
   test("PATH に有る command は従来どおり PATH から解決される(/bin の内蔵 command)", async () => {
@@ -62,14 +62,14 @@ describe("run() の PATH 補強 (PBI-0050)", () => {
   // AC-X2: ENOENT の生 stack trace ではなく「見つからない」を含む 1 行
   test("どこにも無い command は名前の付いた Error(ENOENT の生を晒さない)", async () => {
     expect(() => run({ env: launchdEnv() }, ["no-such-paa-runtime-cli"]))
-      .toThrow(/no-such-paa-runtime-cli が見つかりません/);
+      .toThrow(/no-such-paa-runtime-cli was not found/);
   });
 
   test("HOME が無い env では固定 dir(/usr/local/bin 等)だけ補強する", async () => {
     // HOME 無しでも throw しない(補強 dir 一覧が空にはならない)
     await expect(run({ env: { PATH: "/usr/bin:/bin" } }, ["echo", "x"])).resolves.toMatchObject({ ok: true });
     expect(() => run({ env: { PATH: "/usr/bin:/bin" } }, ["no-such-paa-runtime-cli"])).toThrow(
-      /が見つかりません/,
+      /was not found/,
     );
   });
 });

@@ -140,7 +140,7 @@ fn run_version_probe(path: &Path, args: &[String]) -> Option<String> {
     let out_file = match fs::File::create(&out_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("broker: version probe 一時ファイル作成失敗 {}: {e}", out_path.display());
+            eprintln!("broker: version probe could not create a temp file {}: {e}", out_path.display());
             return None;
         }
     };
@@ -155,7 +155,7 @@ fn run_version_probe(path: &Path, args: &[String]) -> Option<String> {
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("broker: version probe spawn 失敗 {}: {e}", path.display());
+            eprintln!("broker: version probe spawn failed {}: {e}", path.display());
             let _ = fs::remove_file(&out_path);
             return None;
         }
@@ -174,7 +174,7 @@ fn run_version_probe(path: &Path, args: &[String]) -> Option<String> {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Err(e) => {
-                eprintln!("broker: version probe wait 失敗 {}: {e}", path.display());
+                eprintln!("broker: version probe wait failed {}: {e}", path.display());
                 break false;
             }
         }
@@ -347,7 +347,7 @@ pub fn scan(registry: &Registry, env: &ScanEnv, versions: &mut VersionCache) -> 
     let mut out = Vec::new();
     for d in &registry.detectors {
         // `detect.always`(PBI-0070): 探索せずに常に見つかったことにする。外部 API provider は
-        // 端末に binary を持たない —— 実体は `paa agent <provider>` で、端末の device key が
+        // 端末に binary を持たない —— 実体は `atn agent <provider>` で、端末の device key が
         // あれば必ず使える(EP-0009 C)。path は空(spawn 先は PAA_CLI が決める)
         if d.detect.always {
             out.push(Found {
@@ -406,7 +406,7 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     fn tmp(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!("paa-broker-scan-{name}-{}", std::process::id()));
+        let dir = env::temp_dir().join(format!("atn-broker-scan-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -853,7 +853,7 @@ mod tests {
         let reg = registry::parse(
             r#"{"version":1,"detectors":[
                 {"id":"openai-api","kind":"api","detect":{"always":true},"adapter":"official/api"},
-                {"id":"nothere","detect":{"binaries":["paa-broker-not-a-real-binary"]},"adapter":"official/x"}
+                {"id":"nothere","detect":{"binaries":["atn-broker-not-a-real-binary"]},"adapter":"official/x"}
             ]}"#,
             "t",
         )

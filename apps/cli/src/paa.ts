@@ -36,45 +36,45 @@ import { ADAPTERS, findAdapter, SUPPORTED_IDS } from "./registry.ts";
 // paa —— Personal Agent Account の入口(配布戦略 §7.2 Common Installation Engine の CLI 面)。
 // plugin-first UX でもここを通るので、pairing / install / 診断のロジックは 1 系統。
 
-const USAGE = `paa —— Personal Agent Account
+const USAGE = `atn —— All Together Now
 
-使い方: repo 直下で  bun run paa <command>
-        (どこからでも paa で呼びたい場合: cd apps/cli && bun link)
+Usage: atn <command>
+       (from a repo checkout: bun run atn <command>)
 
-  login                  まずこれ。この Mac を Account に接続し、broker を起動する
-                         (darwin では launchd 常駐を試み、失敗時のみ detached にフォールバック)
-  broker                 broker を前景起動する (login/launchd が呼ぶ入口)
-  broker install         broker を launchd に登録する (再起動後も自動起動。darwin のみ)
-  broker uninstall       launchd 登録を解除する
-  broker status          plist / launchd job / process の生存状態を表示する
-  install <runtime>     runtime を pair して MCP server を登録する
-  adopt                 発行済み credential を materialize する (broker が呼ぶ。対話しない)
-  uninstall <runtime>   MCP 登録とローカル credential を消す
-  pair <runtime>        pairing のみ行う
-  status                attach 先と未読の要約を出す (本文は出さない)
-  statusline [--refresh] statusline 用の 1 行を出す (--refresh で取得し直して cache に書く)
-  doctor [runtime]      接続状態を診断する
-  runtimes              対応 runtime と接続状態の一覧
-  extensions            desired extension 一覧 + runtime 別 status
-  sync [runtime]        Extension Sync を実行する(runtime 省略時は接続済み全部)
+  login                  Start here. Connects this machine to your account and starts the broker
+                         (on macOS it registers a launchd agent; falls back to a detached process)
+  broker                 Run the broker in the foreground (what login / launchd invoke)
+  broker install         Register the broker with launchd (auto-starts after reboot; macOS only)
+  broker uninstall       Remove the launchd registration
+  broker status          Show plist / launchd job / process state
+  install <runtime>     Pair a runtime and register the MCP server in it
+  adopt                 Materialize an issued credential (called by the broker; non-interactive)
+  uninstall <runtime>   Remove the MCP registration and the local credential
+  pair <runtime>        Pair only
+  status                Who is attached and what is unread (counts only, never bodies)
+  statusline [--refresh] One line for a status bar (--refresh re-fetches and writes the cache)
+  doctor [runtime]      Diagnose the connection
+  runtimes              Supported runtimes and their connection state
+  extensions            Desired extensions + per-runtime status
+  sync [runtime]        Run Extension Sync (all attached runtimes when omitted)
   admin recover <handle>
-                        運営用: token を失った account に session を 1 本発行する
-                        ($PAA_ADMIN_TOKEN が要る。server 側 env と同じ値)
+                        Operator only: issue one session for an account that lost its token
+                        (needs $PAA_ADMIN_TOKEN — the same value as the server's env)
 
   agent <provider> --thread <id>
-                        外部 API provider を端末側 runtime として 1 turn 動かし、
-                        返信の下書きを thread へ渡す (${AGENT_PROVIDERS.join(" / ")})
+                        Run an external API provider as this machine's runtime for one turn and
+                        hand the draft reply to the thread (${AGENT_PROVIDERS.join(" / ")})
 
-  --url <base-url>      Account API (既定: $PAA_URL または ${DEFAULT_BASE_URL})
-  --repair              install 時に credential を作り直す
-  --dry-run             sync 時、plan を出すだけで native/DB に書き込まない
-  --no-open             login/install/pair で承認 URL を自動で開かない
-  --foreground          login で broker を detached ではなく前景起動する
-  --thread <id>         agent が返信する thread
-  --model <name>        agent が使う model (既定は provider ごと。$PAA_AGENT_MODEL でも指定可)
-  --wait <sec>          agent が connection 承認を待つ上限秒 (既定 300 / 0 で待たない)
+  --url <base-url>      Account API (default: $PAA_URL or ${DEFAULT_BASE_URL})
+  --repair              Recreate the credential on install
+  --dry-run             On sync, print the plan without writing to native config / DB
+  --no-open             Don't open the approval URL automatically (login / install / pair)
+  --foreground          Run the broker in the foreground on login instead of detached
+  --thread <id>         Thread the agent replies to
+  --model <name>        Model the agent uses (default per provider; $PAA_AGENT_MODEL also works)
+  --wait <sec>          Max seconds the agent waits for connection approval (default 300; 0 = don't wait)
 
-対応 runtime: ${SUPPORTED_IDS.join(", ")}`;
+Supported runtimes: ${SUPPORTED_IDS.join(", ")}`;
 
 const ctx: AdapterContext = { env: process.env };
 
@@ -91,11 +91,11 @@ function baseUrlOf(args: string[]): string | undefined {
 
 function showPrompt(prompt: PairPrompt): void {
   console.log(`
-  1. browser で開く: ${prompt.verification_uri_complete}
-  2. code: ${prompt.user_code}
-  3. Account 側で「承認」を押す (${Math.round(prompt.expires_in / 60)} 分以内)
+  1. Open in a browser: ${prompt.verification_uri_complete}
+  2. Code: ${prompt.user_code}
+  3. Press "Approve" on the account side (within ${Math.round(prompt.expires_in / 60)} minutes)
 
-  承認を待っています...`);
+  Waiting for approval...`);
   maybeOpenBrowser(prompt.verification_uri_complete);
 }
 
@@ -127,7 +127,7 @@ function maybeOpenBrowser(url: string): void {
  * 2 つだが、二重起動判定はどちらも同じ pid file(`claimBrokerPidFile` / `runningBrokerPid`)で行う
  */
 function brokerHome(): string {
-  return process.env.PAA_BROKER_HOME ?? join(homedir(), ".paa", "broker");
+  return process.env.PAA_BROKER_HOME ?? join(homedir(), ".atn", "broker");
 }
 const brokerPidPath = () => join(brokerHome(), "broker.pid");
 const brokerLogPath = () => join(brokerHome(), "broker.log");
@@ -164,7 +164,7 @@ async function pidRecord(pid: number): Promise<string> {
 /**
  * pid file が「今生きている broker」を指していればその pid。
  * - `<pid> <lstart>`(現行形式): その pid の現在の起動時刻が一致する時だけ生存
- * - `<pid>` のみ(旧形式 / 起動時刻が取れなかった行): 実行ファイル名が `paa-broker` の時だけ生存
+ * - `<pid>` のみ(旧形式 / 起動時刻が取れなかった行): 実行ファイル名が `atn-broker` の時だけ生存
  *   (更新前に起動した本物の broker を殺さず、再利用された無関係な pid は拾わない)
  */
 async function runningBrokerPid(): Promise<number | undefined> {
@@ -181,7 +181,7 @@ async function runningBrokerPid(): Promise<number | undefined> {
   if (start === null) return undefined;
   if (m[2]) return start === m[2].replace(/\s+/g, " ") ? pid : undefined;
   const comm = await psColumn(pid, "comm");
-  return comm !== null && /(^|\/)paa-broker$/.test(comm) ? pid : undefined;
+  return comm !== null && /(^|\/)atn-broker$/.test(comm) ? pid : undefined;
 }
 
 /** repo checkout の root(broker binary の既定探索先の基点。apps/cli/src/ から 3 階層上) */
@@ -190,32 +190,32 @@ const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 /**
  * broker binary の解決。`PAA_BROKER_BIN` は明示指定として fallback しない
  * (`PAA_CLI` と同じ設計)。未指定なら release → debug → 公開 Release からの取得先(PBI-0154) →
- * PATH の `paa-broker` の順。**見つからなければ null** —— 呼び出し側は spawn より前
+ * PATH の `atn-broker` の順。**見つからなければ null** —— 呼び出し側は spawn より前
  * (launchd 登録より前)に build 案内で止まる。launchd に登録してから binary 不在に気付くと、
- * 案内は launchd が起こす `paa broker` の log にしか出ず、`KeepAlive` が 10 秒毎に再起動し続ける
+ * 案内は launchd が起こす `atn broker` の log にしか出ず、`KeepAlive` が 10 秒毎に再起動し続ける
  * (PBI-0048 レビュー AC-X2)
  */
 function resolveBrokerBin(): string | null {
   if (process.env.PAA_BROKER_BIN) {
     return existsSync(process.env.PAA_BROKER_BIN) ? process.env.PAA_BROKER_BIN : null;
   }
-  const release = join(REPO_ROOT, "broker", "target", "release", "paa-broker");
+  const release = join(REPO_ROOT, "broker", "target", "release", "atn-broker");
   if (existsSync(release)) return release;
-  const debug = join(REPO_ROOT, "broker", "target", "debug", "paa-broker");
+  const debug = join(REPO_ROOT, "broker", "target", "debug", "atn-broker");
   if (existsSync(debug)) return debug;
-  const downloaded = join(binDir(), "paa-broker");
+  const downloaded = join(binDir(), "atn-broker");
   if (existsSync(downloaded)) return downloaded;
-  return Bun.which("paa-broker");
+  return Bun.which("atn-broker");
 }
 
 const BROKER_BUILD_HINT =
-  "broker binary が見つかりません。'cargo build --release --manifest-path broker/Cargo.toml' を実行してください\n" +
-  "  (credential は保存済みです。build 後は 'bun run paa broker' で起動できます)";
+  "The broker binary was not found. Run 'cargo build --release --manifest-path broker/Cargo.toml'\n" +
+  "  (your credential is saved; after the build, 'atn broker' starts it)";
 
 /**
  * repo checkout も cargo も無い配布先(README の Quickstart)向け: broker binary がどこにも
  * 無ければ公開 Release から取得を試みる(PBI-0154)。取れなくても黙って cargo 案内(呼び出し側の
- * `BROKER_BUILD_HINT`)に倒す —— network が無いだけで `paa login` を失敗させない。
+ * `BROKER_BUILD_HINT`)に倒す —— network が無いだけで `atn login` を失敗させない。
  * checksum 不一致だけは特別扱いする: 「build し直せ」という cargo 案内は誤りなので、
  * ここで壊れている旨を出して止める
  */
@@ -225,18 +225,18 @@ async function ensureBrokerBinary(): Promise<void> {
   // だけは毎回 ensureBinary に通す** —— ここで「在るから何もしない」にすると、paa を新しくしても
   // broker だけ初回に取った版のまま固定される(版が同じなら stamp を見て present で即返るので、
   // 通しても download は起きない)
-  if (found && found !== join(binDir(), "paa-broker")) return;
-  const outcome = await ensureBinary("paa-broker");
+  if (found && found !== join(binDir(), "atn-broker")) return;
+  const outcome = await ensureBinary("atn-broker");
   if (outcome.status === "checksum_mismatch") {
-    fail(`NG 取得物が壊れています: ${outcome.detail}`);
+    fail(`NG the downloaded file is corrupt: ${outcome.detail}`);
   }
 }
 
 /**
- * broker(Rust)へ渡す env。`PAA_CLI` は dev repo で `paa` が PATH に無いため必須(broker/src/adopt.rs)。
+ * broker(Rust)へ渡す env。`PAA_CLI` は dev repo で `atn` が PATH に無いため必須(broker/src/adopt.rs)。
  * argv0 は `process.execPath`(bun 自体の絶対 path)にする —— launchd 環境は最小 PATH しか持たず
  * bare な `"bun"` を解決できないため(PBI-0048。detached spawn は `process.env` を継承するので
- * 従来の `"bun"` 決め打ちでも動いていたが、launchd 経由では broker(Rust)が起こす `paa adopt` が
+ * 従来の `"bun"` 決め打ちでも動いていたが、launchd 経由では broker(Rust)が起こす `atn adopt` が
  * 解決に失敗する)
  */
 function brokerEnv(credential: RuntimeCredential): Record<string, string> {
@@ -257,7 +257,7 @@ async function runBrokerForeground(credential: RuntimeCredential): Promise<numbe
   const bin = resolveBrokerBin();
   if (!bin) fail(BROKER_BUILD_HINT);
   await mkdir(brokerHome(), { recursive: true });
-  if (!(await claimBrokerPidFile())) fail("broker は既に起動しています(pid file が生存プロセスを指しています)");
+  if (!(await claimBrokerPidFile())) fail("The broker is already running (the pid file points at a live process)");
   let child: ReturnType<typeof Bun.spawn>;
   try {
     child = Bun.spawn([bin], {
@@ -333,7 +333,7 @@ async function withStaleTakeoverLock<T>(fn: () => Promise<T>, fallback: T): Prom
  * stale file(前回クラッシュ / 再起動で残った死んだ pid)の再利用は「内容が確定していて、かつ死んでいる」
  * 時だけ、しかも **`withStaleTakeoverLock` の中で 1 プロセスずつ**行う。lock 無しの
  * `readFile → rm → link` では、後発の `rm` が先発の `link` 済み file を消す窓が残り、2 本同時の
- * `paa login` が両方 spawn した(20 回に 1 回。PBI-0046 レビュー AC-X3)。
+ * `atn login` が両方 spawn した(20 回に 1 回。PBI-0046 レビュー AC-X3)。
  * 読めない/空文字列(書き込み中と区別できない)は「不明」として消さずに諦める —— ここを
  * 「空 = stale」と誤認して即 rm すると、勝者の file を横取りして両方が spawn する。
  */
@@ -401,7 +401,7 @@ async function startBrokerDetached(credential: RuntimeCredential): Promise<Detac
 function launchAgentsDir(): string {
   return process.env.PAA_LAUNCH_AGENTS_DIR ?? join(homedir(), "Library", "LaunchAgents");
 }
-const LAUNCHD_LABEL = "com.paa.broker";
+const LAUNCHD_LABEL = "com.atn.broker";
 const plistPath = () => join(launchAgentsDir(), `${LAUNCHD_LABEL}.plist`);
 const launchctlBin = () => process.env.PAA_LAUNCHCTL ?? "launchctl";
 
@@ -411,7 +411,7 @@ function escapeXml(s: string): string {
 
 /**
  * plist は world-readable な file なので **token を絶対に書かない**(§4 と同格の secret 漏洩)。
- * `paa broker` は起動時に credentials.json(0600)から自分で token を読む(PBI-0046)ので、
+ * `atn broker` は起動時に credentials.json(0600)から自分で token を読む(PBI-0046)ので、
  * plist が運ぶのは argv と(test の隔離環境を launchd 経由でも保つための)非 secret env だけ。
  * argv0 に `process.execPath` を使うのは launchd の最小 PATH が bare な `"bun"` を解決できないため。
  */
@@ -505,10 +505,10 @@ function printFindings(findings: Finding[]): boolean {
 }
 
 function requireAdapter(id: string | undefined) {
-  if (!id) fail(`runtime を指定してください (${SUPPORTED_IDS.join(", ")})`);
+  if (!id) fail(`Specify a runtime (${SUPPORTED_IDS.join(", ")})`);
   const adapter = findAdapter(id);
   if (!adapter) {
-    fail(`未対応の runtime: ${id}\n対応: ${SUPPORTED_IDS.join(", ")}`);
+    fail(`Unsupported runtime: ${id}\nSupported: ${SUPPORTED_IDS.join(", ")}`);
   }
   return adapter;
 }
@@ -558,9 +558,9 @@ switch (command) {
         name: hostname(),
         onPrompt: showPrompt,
       });
-      if (outcome.status === "denied") fail("NG pairing が拒否されました");
-      if (outcome.status === "expired") fail("NG pairing が期限切れです。もう一度実行してください");
-      if (outcome.status === "failed") fail(`NG pairing に失敗しました: ${outcome.detail}`);
+      if (outcome.status === "denied") fail("NG pairing was denied");
+      if (outcome.status === "expired") fail("NG pairing expired. Run it again");
+      if (outcome.status === "failed") fail(`NG pairing failed: ${outcome.detail}`);
       credential = outcome.credential;
       const who = await apiCall(credential.base_url, "/v1/whoami", {
         token: credential.token,
@@ -574,14 +574,14 @@ switch (command) {
     const outcome = await startBroker(credential);
     if (outcome === "build_needed") fail(BROKER_BUILD_HINT);
     if (outcome === "already_running") {
-      console.log("broker は既に起動しています");
+      console.log("The broker is already running");
       break;
     }
     console.log(
-      `\nこの Mac は @${handle ?? "?"} に接続されました。中の AI は自動で見つかり、Your AI に並びます`,
+      `\nThis machine is now connected to @${handle ?? "?"}. The AIs on it are found automatically and appear under Your AI`,
     );
     if (outcome === "started_launchd") {
-      console.log(`launchd に登録しました(${plistPath()})。再起動後も自動的に起動します`);
+      console.log(`Registered with launchd (${plistPath()}). It starts automatically after a reboot`);
     } else {
       console.log(`broker log: ${brokerLogPath()}`);
     }
@@ -591,13 +591,13 @@ switch (command) {
   case "broker": {
     const sub = target;
     if (sub === "install") {
-      if (process.platform !== "darwin") fail("broker install は macOS(launchd)のみ対応です");
+      if (process.platform !== "darwin") fail("broker install is macOS (launchd) only");
       const credential = await getCredential("broker");
-      if (!credential) fail("未接続です。'bun run paa login' を実行してください");
+      if (!credential) fail("Not connected. Run 'atn login' first");
       if (!resolveBrokerBin()) fail(BROKER_BUILD_HINT);
       const ok = await tryInstallLaunchdBroker();
-      if (!ok) fail(`NG launchd への登録に失敗しました(plist: ${plistPath()})`);
-      console.log(`launchd に登録しました(${plistPath()})。再起動後も broker は自動的に起動します`);
+      if (!ok) fail(`NG registering with launchd failed (plist: ${plistPath()})`);
+      console.log(`Registered with launchd (${plistPath()}). The broker starts automatically after a reboot`);
       break;
     }
     if (sub === "uninstall") {
@@ -605,8 +605,8 @@ switch (command) {
       const unload = await runLaunchctl(["unload", plistPath()]);
       await rm(plistPath(), { force: true });
       console.log(
-        `launchd 登録を解除しました${existed ? "" : "(plist は元々ありませんでした)"}` +
-          (unload.ok || !existed ? "" : `(unload 時の警告: ${unload.detail})`),
+        `Removed the launchd registration${existed ? "" : " (there was no plist to begin with)"}` +
+          (unload.ok || !existed ? "" : ` (warning on unload: ${unload.detail})`),
       );
       break;
     }
@@ -614,14 +614,14 @@ switch (command) {
       const plistInstalled = existsSync(plistPath());
       const list = await runLaunchctl(["list", LAUNCHD_LABEL]);
       const pid = await runningBrokerPid();
-      console.log(`launchd plist: ${plistInstalled ? `インストール済み (${plistPath()})` : "未インストール"}`);
-      console.log(`launchd job: ${list.ok ? "登録済み" : "未登録"}`);
-      console.log(`broker process: ${pid ? `生存 (pid ${pid})` : "停止"}`);
+      console.log(`launchd plist: ${plistInstalled ? `installed (${plistPath()})` : "not installed"}`);
+      console.log(`launchd job: ${list.ok ? "registered" : "not registered"}`);
+      console.log(`broker process: ${pid ? `running (pid ${pid})` : "stopped"}`);
       break;
     }
-    if (sub !== undefined) fail(`不明な broker サブコマンド: ${sub}\n対応: install / uninstall / status`);
+    if (sub !== undefined) fail(`Unknown broker subcommand: ${sub}\nSupported: install / uninstall / status`);
     const credential = await getCredential("broker");
-    if (!credential) fail("未接続です。'bun run paa login' を実行してください");
+    if (!credential) fail("Not connected. Run 'atn login' first");
     process.exit(await runBrokerForeground(credential));
     break;
   }
@@ -636,16 +636,16 @@ switch (command) {
       repair: args.includes("--repair"),
     });
     if (outcome.status === "runtime_not_found") fail(`NG ${outcome.detail}`);
-    if (outcome.status === "denied") fail("NG pairing が拒否されました");
-    if (outcome.status === "expired") fail("NG pairing が期限切れです。もう一度実行してください");
-    if (outcome.status === "failed") fail(`NG pairing に失敗しました: ${outcome.detail}`);
+    if (outcome.status === "denied") fail("NG pairing was denied");
+    if (outcome.status === "expired") fail("NG pairing expired. Run it again");
+    if (outcome.status === "failed") fail(`NG pairing failed: ${outcome.detail}`);
     console.log(
-      `\n${adapter.displayName} を ${outcome.credential.name} として接続しました${
-        outcome.paired ? "" : " (既存 credential を再利用)"
+      `\nConnected ${adapter.displayName} as ${outcome.credential.name}${
+        outcome.paired ? "" : " (reused the existing credential)"
       }`,
     );
     if (!printFindings(outcome.findings)) process.exit(1);
-    console.log(`\n${adapter.displayName} を再起動すると @account の tool が使えます`);
+    console.log(`\nRestart ${adapter.displayName} and the @account tools become available`);
     break;
   }
 
@@ -661,19 +661,19 @@ switch (command) {
     const url = flagValue("--base-url");
     const name = flagValue("--name");
     if (!args.includes("--token-stdin")) {
-      fail("adopt: --token-stdin が必要です(token を argv では受けません)", 2);
+      fail("adopt: --token-stdin is required (the token is not accepted on argv)", 2);
     }
     if (!kind || !runtimeId || !url || !name) {
-      fail("adopt: --kind / --runtime-id / --base-url / --name が必要です", 2);
+      fail("adopt: --kind / --runtime-id / --base-url / --name are required", 2);
     }
     // registry に entry があっても adapter 実装が無い runtime はここで落ちる(exit 2)。
     // Cloud 側も adapter:null は登録対象から外すので、ここに来るのは配布のずれ
     const adapter = findAdapter(kind);
-    if (!adapter) fail(`adopt: 未対応の runtime: ${kind}\n対応: ${SUPPORTED_IDS.join(", ")}`, 2);
+    if (!adapter) fail(`adopt: unsupported runtime: ${kind}\nSupported: ${SUPPORTED_IDS.join(", ")}`, 2);
     const token = (await Bun.stdin.text()).trim();
-    if (!token) fail("adopt: stdin から token を読めませんでした", 2);
+    if (!token) fail("adopt: could not read the token from stdin", 2);
     const cleanUrl = url.replace(/\/$/, "");
-    // 同じ端末に human が `paa install` で入れた同 kind の credential があれば奪わない(AC-11)。
+    // 同じ端末に human が `atn install` で入れた同 kind の credential があれば奪わない(AC-11)。
     // credentials.json は kind 単位の 1 entry なので、上書きすると Cloud 側の既定 runtime
     // (getDefaultRuntime)と実際に認証する runtime がずれ、per-actor read state(§19/§23.1)が割れる。
     // 「どの credential がこの端末に居るか」は端末しか知らないので、判定は CLI 側に置く
@@ -694,8 +694,8 @@ switch (command) {
       if (who?.status !== 401) {
         console.error(who?.status === 200 ? CREDENTIAL_OWNED_BY_HUMAN : CREDENTIAL_CHECK_FAILED);
         console.error(
-          `  ${adapter.displayName} は既に ${owned.name} (${owned.runtime_id}) として接続済みか、` +
-            `生死が確認できません。自動登録では置き換えません`,
+          `  ${adapter.displayName} is already connected as ${owned.name} (${owned.runtime_id}), or its state ` +
+            `cannot be verified. Auto-registration will not replace it`,
         );
         process.exit(2);
       }
@@ -717,9 +717,9 @@ switch (command) {
     } catch (e) {
       // exit != 0 で broker が `register_ack ok:false` を返し、Cloud が行を revoke する
       // (credential だけ生きて MCP config が無い半端な状態を残さない)
-      fail(`adopt: MCP 登録に失敗しました: ${(e as Error).message}`, 2);
+      fail(`adopt: registering the MCP server failed: ${(e as Error).message}`, 2);
     }
-    console.log(`adopt: ${adapter.displayName} を ${name} (${runtimeId}) として接続しました`);
+    console.log(`adopt: connected ${adapter.displayName} as ${name} (${runtimeId})`);
     break;
   }
 
@@ -727,12 +727,12 @@ switch (command) {
     const adapter = requireAdapter(target);
     const outcome = await uninstallRuntime({ adapter, ctx, baseUrl });
     console.log(
-      `${adapter.displayName}: MCP 登録 ${outcome.unregistered ? "削除" : "削除できず"} / ` +
-        `credential ${outcome.credentialRemoved ? "削除" : "無し"}`,
+      `${adapter.displayName}: MCP registration ${outcome.unregistered ? "removed" : "could not be removed"} / ` +
+        `credential ${outcome.credentialRemoved ? "removed" : "none"}`,
     );
     // 「未登録だった」と「CLI が壊れていて消せなかった」を混ぜない
-    if (outcome.detail) console.log(`  理由: ${outcome.detail}`);
-    console.log("Cloud 側の接続解除は web の Settings → Connected runtimes から行ってください");
+    if (outcome.detail) console.log(`  reason: ${outcome.detail}`);
+    console.log("To disconnect on the account side, use Settings → Connected runtimes on the web");
     break;
   }
 
@@ -744,10 +744,10 @@ switch (command) {
       name: `${hostname()} / ${adapter.displayName}`,
       onPrompt: showPrompt,
     });
-    if (outcome.status === "denied") fail("NG pairing が拒否されました");
-    if (outcome.status === "expired") fail("NG pairing が期限切れです");
-    if (outcome.status === "failed") fail(`NG pairing に失敗しました: ${outcome.detail}`);
-    console.log(`\n接続しました: ${outcome.credential.name} (${outcome.credential.runtime_id})`);
+    if (outcome.status === "denied") fail("NG pairing was denied");
+    if (outcome.status === "expired") fail("NG pairing expired");
+    if (outcome.status === "failed") fail(`NG pairing failed: ${outcome.detail}`);
+    console.log(`\nConnected: ${outcome.credential.name} (${outcome.credential.runtime_id})`);
     break;
   }
 
@@ -755,7 +755,7 @@ switch (command) {
     const credentials = (await loadCredentials()).runtimes;
     const entries = Object.entries(credentials);
     if (entries.length === 0) {
-      fail("未接続です。'bun run paa login' から始めてください");
+      fail("Not connected. Start with 'atn login'");
     }
     for (const [kind, credential] of entries) {
       const adapter = findAdapter(kind);
@@ -793,8 +793,8 @@ switch (command) {
       // server 断・auth 失効は「前の値を残す」。cache を消しも上書きもしない ——
       // 通信が切れた瞬間に statusline の表示が消えるのが一番わかりにくい。
       // 理由は stderr にだけ出す: statusline.sh は stderr を捨てるので表示は汚れず、
-      // 手で `paa statusline --refresh` を叩いた時だけ原因が見える(黙って空になるのを避ける)
-      console.error(`statusline refresh をやめました: ${(e as Error).message}`);
+      // 手で `atn statusline --refresh` を叩いた時だけ原因が見える(黙って空になるのを避ける)
+      console.error(`statusline refresh aborted: ${(e as Error).message}`);
     }
     break;
   }
@@ -816,8 +816,8 @@ switch (command) {
       const credential = credentials[adapter.id];
       console.log(
         `${adapter.id.padEnd(8)} ${adapter.displayName.padEnd(14)} ` +
-          `${detected.installed ? "検出" : "未検出"} / ` +
-          `${credential ? `接続済み (${credential.runtime_id})` : "未接続"}`,
+          `${detected.installed ? "detected" : "not detected"} / ` +
+          `${credential ? `connected (${credential.runtime_id})` : "not connected"}`,
       );
     }
     break;
@@ -826,20 +826,20 @@ switch (command) {
   case "extensions": {
     const credentials = (await loadCredentials()).runtimes;
     const entry = Object.values(credentials)[0];
-    if (!entry) fail("未接続です。'bun run paa login' から始めてください");
+    if (!entry) fail("Not connected. Start with 'atn login'");
     const res = await apiCall(entry.base_url, "/v1/extensions", { token: entry.token });
-    if (res.status !== 200) fail(`NG /v1/extensions が ${res.status} を返しました`);
+    if (res.status !== 200) fail(`NG /v1/extensions returned ${res.status}`);
     const list = res.body as any[];
     if (list.length === 0) {
-      console.log("desired extension はまだ登録されていません");
+      console.log("No desired extensions registered yet");
       break;
     }
     for (const ext of list) {
       const status =
         (ext.materializations as any[])
           .map((m) => `${m.runtime_id}:${m.status}`)
-          .join(", ") || "(未 sync)";
-      const flags = [ext.enabled ? null : "disabled", ext.deleted_at ? "削除待ち" : null]
+          .join(", ") || "(not synced)";
+      const flags = [ext.enabled ? null : "disabled", ext.deleted_at ? "pending deletion" : null]
         .filter(Boolean)
         .join(",");
       console.log(
@@ -857,13 +857,13 @@ switch (command) {
       ? [requireAdapter(target)]
       : ADAPTERS.filter((a) => credentials[a.id]);
     if (targets.length === 0) {
-      fail("未接続です。'bun run paa login' から始めてください");
+      fail("Not connected. Start with 'atn login'");
     }
     let anyFailed = false;
     for (const adapter of targets) {
       const credential = credentials[adapter.id];
       if (!credential) {
-        console.log(`\n[${adapter.displayName}] 未接続。skip`);
+        console.log(`\n[${adapter.displayName}] not connected — skipped`);
         continue;
       }
       console.log(`\n[${adapter.displayName}]`);
@@ -877,13 +877,13 @@ switch (command) {
       });
       const acted = result.plan.filter((item) => item.action !== "noop");
       if (acted.length === 0) {
-        console.log("  差分なし");
+        console.log("  no changes");
       }
       for (const item of acted) {
         console.log(`  ${item.action.padEnd(12)} ${item.name}`);
       }
       if (dryRun) {
-        console.log("  (dry-run: 何も書き込んでいません)");
+        console.log("  (dry-run: nothing was written)");
         continue;
       }
       for (const f of result.failed) {
@@ -900,10 +900,10 @@ switch (command) {
     // server 側 agent は E2EE(アーキ §9)により作れないので、復号できるこの端末で動かす
     const provider = target;
     if (!provider || !isAgentProvider(provider)) {
-      fail(`agent には provider が要ります: ${AGENT_PROVIDERS.join(" / ")}`);
+      fail(`agent needs a provider: ${AGENT_PROVIDERS.join(" / ")}`);
     }
     const threadId = flagValue("--thread");
-    if (!threadId) fail("agent には --thread <id> が要ります");
+    if (!threadId) fail("agent needs --thread <id>");
     const waitRaw = flagValue("--wait");
     const result = await runAgent({
       provider,
@@ -912,15 +912,15 @@ switch (command) {
       waitSec: waitRaw != null ? Number(waitRaw) : undefined,
     });
     if (result.status === "sent") {
-      console.log("送信しました");
+      console.log("Sent");
       break;
     }
     if (result.status === "ask_approval_required") {
-      console.log(`ask_approval_required 承認待ちになりました (approval_id=${result.approvalId})`);
+      console.log(`ask_approval_required — waiting for approval (approval_id=${result.approvalId})`);
       break;
     }
     if (result.status === "already_handled") {
-      console.log("already_handled この thread は既に処理済みです");
+      console.log("already_handled — this thread was already handled");
       break;
     }
     fail(`NG ${result.detail ?? result.status}`);
@@ -933,13 +933,13 @@ switch (command) {
     const positional = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--url");
     const [sub, rawHandle] = positional;
     if (sub !== "recover") {
-      fail(`不明な admin サブコマンド: ${sub ?? "(無し)"}\n対応: admin recover <handle>`);
+      fail(`Unknown admin subcommand: ${sub ?? "(none)"}\nSupported: admin recover <handle>`);
     }
     const handle = rawHandle?.replace(/^@+/, "");
-    if (!handle) fail("handle を指定してください (例: paa admin recover shibu)");
+    if (!handle) fail("Specify a handle (e.g. atn admin recover shibu)");
     const adminToken = process.env.PAA_ADMIN_TOKEN;
     if (!adminToken) {
-      fail("PAA_ADMIN_TOKEN がありません。server 側 env と同じ値を渡してください");
+      fail("PAA_ADMIN_TOKEN is not set. Pass the same value as the server's env");
     }
     const url = (baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     const res = await apiCall(url, "/v1/admin/sessions", {
@@ -947,14 +947,14 @@ switch (command) {
       token: adminToken,
       body: { handle },
     });
-    if (res.status === 503) fail("NG server の PAA_ADMIN_TOKEN が未設定です(admin 経路は既定で無効)");
-    if (res.status === 401 || res.status === 403) fail("NG admin token が違います");
-    if (res.status === 404) fail(`NG @${handle} は見つかりません`);
-    if (res.status !== 200) fail(`NG session を発行できません (HTTP ${res.status})`);
-    console.log(`@${res.body.handle} の session token:\n\n  ${res.body.token}\n`);
+    if (res.status === 503) fail("NG the server has no PAA_ADMIN_TOKEN (the admin path is disabled by default)");
+    if (res.status === 401 || res.status === 403) fail("NG wrong admin token");
+    if (res.status === 404) fail(`NG @${handle} was not found`);
+    if (res.status !== 200) fail(`NG could not issue a session (HTTP ${res.status})`);
+    console.log(`Session token for @${res.body.handle}:\n\n  ${res.body.token}\n`);
     console.log(
-      `本人に安全な経路で渡してください。Sign in の「Session token」に貼ると入れます(${url})。\n` +
-        "以後は Settings › Sign-in methods で passkey か復旧コードを備えるよう伝えてください",
+      `Hand it to the account holder over a safe channel. Pasting it into "Session token" on Sign in (${url}) gets them in.\n` +
+        "Then tell them to set up a passkey or recovery codes under Settings › Sign-in methods",
     );
     break;
   }
@@ -966,5 +966,5 @@ switch (command) {
     break;
 
   default:
-    fail(`不明な command: ${command}\n\n${USAGE}`);
+    fail(`Unknown command: ${command}\n\n${USAGE}`);
 }

@@ -23,7 +23,7 @@ import {
 function safeJoin(base: string, rel: string): string {
   const resolved = resolve(base, rel);
   if (!resolved.startsWith(base + sep)) {
-    throw new AdapterError(`skill 拡張の不正なパス: "${rel}"`, "skill ディレクトリの外を指しています");
+    throw new AdapterError(`skill extension: invalid path "${rel}"`, "it points outside the skill directory");
   }
   return resolved;
 }
@@ -60,35 +60,35 @@ async function applySkillExtension(
   const skillDir = safeJoin(skillsDir(ctx), name);
   if (/[/\\]/.test(name)) {
     throw new AdapterError(
-      `skill 拡張 "${name}" の name にパス区切りは使えません`,
-      "skill は skills/ の直下 1 階層にのみ作成します",
+      `skill extension "${name}": the name cannot contain a path separator`,
+      "skills are created only one level below skills/",
     );
   }
   const reservedPaths = new Set(RESERVED_SKILL_FILES.map((f) => join(skillDir, f)));
   const rawFiles = spec.files;
   if (rawFiles != null && (typeof rawFiles !== "object" || Array.isArray(rawFiles))) {
-    throw new AdapterError(`skill 拡張 "${name}" の spec.files がオブジェクトではありません`);
+    throw new AdapterError(`skill extension "${name}": spec.files is not an object`);
   }
   const resolvedFiles: [string, string][] = [];
   for (const [rel, content] of Object.entries((rawFiles ?? {}) as Record<string, unknown>)) {
     const path = safeJoin(skillDir, rel);
     if (reservedPaths.has(path)) {
       throw new AdapterError(
-        `skill 拡張 "${name}" の spec.files が予約ファイル "${rel}" を上書きしようとしています`,
-        "SKILL.md は description/instructions から組み立て、.paa-managed は PAA が管理します",
+        `skill extension "${name}": spec.files tries to overwrite the reserved file "${rel}"`,
+        "SKILL.md is assembled from description/instructions, and .paa-managed is managed by All Together Now",
       );
     }
     if (typeof content !== "string") {
-      throw new AdapterError(`skill 拡張 "${name}" の spec.files["${rel}"] が文字列ではありません`);
+      throw new AdapterError(`skill extension "${name}": spec.files["${rel}"] is not a string`);
     }
     resolvedFiles.push([path, content]);
   }
   // 2. spec.description / spec.instructions が string でなければ throw(何も書かない)
   if (typeof spec.description !== "string") {
-    throw new AdapterError(`skill 拡張 "${name}" の spec.description が文字列ではありません`);
+    throw new AdapterError(`skill extension "${name}": spec.description is not a string`);
   }
   if (typeof spec.instructions !== "string") {
-    throw new AdapterError(`skill 拡張 "${name}" の spec.instructions が文字列ではありません`);
+    throw new AdapterError(`skill extension "${name}": spec.instructions is not a string`);
   }
   // 既存の skillDir が有るのに PAA marker が無ければ、人間が別途作った private skill(名前が
   // たまたま衝突しただけ)である可能性が高い — 絶対に上書きしない(何も書かない)
@@ -102,8 +102,8 @@ async function applySkillExtension(
   );
   if (dirExists && !existingMarker) {
     throw new AdapterError(
-      `skill 拡張 "${name}" は PAA が作成していない既存ディレクトリと衝突しています`,
-      `${skillDir} は PAA marker (${PAA_MANAGED_MARKER}) を持たないため上書きしません`,
+      `skill extension "${name}" collides with an existing directory that All Together Now did not create`,
+      `${skillDir} has no marker (${PAA_MANAGED_MARKER}), so it will not be overwritten`,
     );
   }
 

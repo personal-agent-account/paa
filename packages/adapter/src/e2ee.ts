@@ -3,7 +3,7 @@ import { open, seal, type EncryptedEnvelope } from "@paa/crypto-envelope";
 import { getOrCreateDeviceKey } from "./devicekeys.ts";
 
 // Native E2EE(要件 §9-11 / PBI-0006)の client 側の作法を 1 箇所に集める。
-// 使うのは MCP tools(packages/mcp)と `paa agent`(apps/cli。PBI-0057)の 2 つで、
+// 使うのは MCP tools(packages/mcp)と `atn agent`(apps/cli。PBI-0057)の 2 つで、
 // どちらも「device を upsert 登録 → 宛先の公開鍵を引く → seal / open」の同じ手順を踏む。
 // HTTP の呼び方(認証・error 型)は呼び出し側で違うので `call` を注入する —— ここに 2 つ目の
 // API client を作らないための境界(呼び出し側の error 型・retry 方針をそのまま活かす)。

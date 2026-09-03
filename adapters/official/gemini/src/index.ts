@@ -17,7 +17,7 @@ import {
 // - config は JSON の `mcpServers`(claude と同形)。user scope は
 //   `<GEMINI_CLI_HOME または $HOME>/.gemini/settings.json`
 //
-// **必ず `-s user`**: 既定の project scope は cwd 依存で、broker が起こす `paa adopt` の cwd は
+// **必ず `-s user`**: 既定の project scope は cwd 依存で、broker が起こす `atn adopt` の cwd は
 // launchd 経由だと `/` になる。さらに project scope は「信頼していないフォルダ」だと
 // `mcp list` / `mcp remove` が対象を見つけられない(実測: "MCP servers are configured but
 // disabled because this folder is untrusted")。user scope なら add / remove とも正常に効く。
@@ -31,7 +31,7 @@ export const geminiAdapter: RuntimeAdapter = createMcpConfigAdapter({
   id: "gemini",
   displayName: "Gemini CLI",
   bin: "gemini",
-  installHint: "gemini CLI が見つかりません (npm i -g @google/gemini-cli)",
+  installHint: "gemini CLI was not found (npm i -g @google/gemini-cli)",
   configPath,
   format: "json",
   serversKey: "mcpServers",

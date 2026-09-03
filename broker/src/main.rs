@@ -56,7 +56,7 @@ async fn main() {
     let token = match env::var("PAA_RUNTIME_TOKEN") {
         Ok(t) => t,
         Err(_) => {
-            eprintln!("broker: PAA_RUNTIME_TOKEN が未設定です");
+            eprintln!("broker: PAA_RUNTIME_TOKEN is not set");
             std::process::exit(1);
         }
     };
@@ -114,20 +114,20 @@ async fn main() {
         .await
         {
             Ok(()) => {
-                eprintln!("broker: 接続が閉じられました");
+                eprintln!("broker: connection closed");
                 // clean close は障害ではないので即座に初期値へ戻す(直後の doubling に
                 // 巻き込まれてリセットが 1 段ずれないよう、doubling は Err 側でだけ行う)。
                 backoff = INITIAL_BACKOFF;
                 backoff
             }
             Err(e) => {
-                eprintln!("broker: 接続エラー: {e}");
+                eprintln!("broker: connection error: {e}");
                 let wait = backoff;
                 backoff = min(backoff * 2, MAX_BACKOFF);
                 wait
             }
         };
-        eprintln!("broker: {wait:?} 後に再接続します");
+        eprintln!("broker: reconnecting in {wait:?}");
         tokio::time::sleep(wait).await;
     }
 }
@@ -144,20 +144,20 @@ async fn refresh_registry(state: &mut BrokerState) {
     .await
     .unwrap_or_else(|e| FetchOutcome::Failed(format!("task: {e}")));
     match outcome {
-        FetchOutcome::NotModified => eprintln!("broker: registry 304(cache 維持)"),
+        FetchOutcome::NotModified => eprintln!("broker: registry 304 (cache kept)"),
         FetchOutcome::Updated(reg) => {
             eprintln!(
-                "broker: registry 更新 issued_at={} detectors={:?}",
+                "broker: registry updated issued_at={} detectors={:?}",
                 reg.issued_at,
                 reg.ids()
             );
             state.registry = reg;
         }
         FetchOutcome::Rejected(e) => {
-            eprintln!("broker: registry 署名不一致({e})。破棄して現在の registry({})を維持します", state.registry.origin)
+            eprintln!("broker: registry signature mismatch ({e}). Discarded; keeping the current registry ({})", state.registry.origin)
         }
         FetchOutcome::Failed(e) => {
-            eprintln!("broker: registry 取得失敗 {e}。現在の registry({})を維持します", state.registry.origin)
+            eprintln!("broker: registry fetch failed {e}. Keeping the current registry ({})", state.registry.origin)
         }
     }
 }
@@ -203,7 +203,7 @@ where
         return Ok(());
     }
     *known = current;
-    eprintln!("broker: discovery 更新 = {}", serde_json::to_string(known).unwrap_or_default());
+    eprintln!("broker: discovery updated = {}", serde_json::to_string(known).unwrap_or_default());
     write
         .send(Message::Text(hello_message(known).into()))
         .await
@@ -236,7 +236,7 @@ async fn run_once(
     let (ws_stream, _resp) = connect_async(request)
         .await
         .map_err(|e| format!("connect failed: {e}"))?;
-    eprintln!("broker: 接続確立");
+    eprintln!("broker: connected");
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -313,7 +313,7 @@ async fn run_once(
                         more.push(t);
                     }
                     triggers::absorb(&state.registry, &mut state.hook_dirs, &more);
-                    eprintln!("broker: trigger 再スキャン n={}", batch.len() + more.len());
+                    eprintln!("broker: trigger rescan n={}", batch.len() + more.len());
                     rescan_and_hello(&mut write, state, &mut known_runtimes).await?;
                 }
             }
@@ -327,12 +327,12 @@ async fn run_once(
                     Err(_) => continue,
                 };
                 // 自動登録(PBI-0023 図18): Cloud が hello の応答で credential を返してきた。
-                // kind ごとに `paa adopt` を **同時 1 本ずつ** 起こして materialize し、
+                // kind ごとに `atn adopt` を **同時 1 本ずつ** 起こして materialize し、
                 // 1 件ごとに register_ack を返す(Cloud は ok:false の行を revoke して次の
                 // hello で再試行させる)。5 秒 timeout は adopt 側。
                 if parsed.get("type").and_then(Value::as_str) == Some("registered") {
                     let adoptions = adopt::parse_registered(&parsed);
-                    eprintln!("broker: registered 受信 count={}", adoptions.len());
+                    eprintln!("broker: received registered count={}", adoptions.len());
                     for a in &adoptions {
                         let (ok, detail) = adopt::adopt(a).await;
                         eprintln!(
@@ -374,11 +374,11 @@ async fn run_once(
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty());
                 eprintln!(
-                    "broker: wake 受信 runtime={runtime} sessionMode={session_mode} \
+                    "broker: received wake runtime={runtime} sessionMode={session_mode} \
                      requestId={request_id} dedicated={}",
                     instruction.is_some()
                 );
-                // 外部 API provider(PBI-0070)は端末に binary を持たない —— `paa agent` を
+                // 外部 API provider(PBI-0070)は端末に binary を持たない —— `atn agent` を
                 // PAA_CLI で起こす。返信先の thread は wake payload の threadId から来る
                 let thread_id = parsed.get("threadId").and_then(Value::as_str).unwrap_or("");
                 // triage session の scope token(EP-0013 W3 / PBI-0117)。有る時だけ dedicated

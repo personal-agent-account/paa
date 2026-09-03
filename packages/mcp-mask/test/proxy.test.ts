@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-// PBI-0177 AC-4/AC-5/AC-X2: paa-mask の CLI を fixture MCP server(echo)越しに実行し、
+// PBI-0177 AC-4/AC-5/AC-X2: atn-mask の CLI を fixture MCP server(echo)越しに実行し、
 // JSON-RPC の initialize → tools/list → tools/call が protocol を壊さず通る事、
 // result が mask され、次の call の params で復元される事、--dry-run、
 // 子の exit code 伝播、config 異常時の fail-closed を確認する(実 subprocess で end-to-end)。
@@ -13,7 +13,7 @@ function jsonRpc(id: number, method: string, params?: unknown): string {
   return JSON.stringify({ jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) });
 }
 
-/** paa-mask を fixture 越しに起動し、送った行への応答(id 一致)を返す */
+/** atn-mask を fixture 越しに起動し、送った行への応答(id 一致)を返す */
 async function withProxy<T>(
   env: Record<string, string>,
   fn: (send: (line: string) => Promise<any>, proc: Bun.Subprocess<"pipe", "pipe", "pipe">) => Promise<T>,
@@ -55,7 +55,7 @@ async function withProxy<T>(
   }
 }
 
-describe("paa-mask proxy (PBI-0177)", () => {
+describe("atn-mask proxy (PBI-0177)", () => {
   test("AC-4: initialize → tools/list → tools/call が protocol を壊さず通る", async () => {
     await withProxy({ PAA_SECRETS_PATH: "/nonexistent/secrets.json" }, async (send) => {
       const init = await send(

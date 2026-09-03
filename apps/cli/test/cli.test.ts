@@ -50,7 +50,7 @@ describe("paa CLI", () => {
   test("未対応 runtime は対応一覧を出して失敗する(AC-14)", async () => {
     const result = await paa(["install", "hermes"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("未対応の runtime: hermes");
+    expect(result.stderr).toContain("Unsupported runtime: hermes");
     expect(result.stderr).toContain("claude, codex");
   }, 30_000);
 
@@ -78,12 +78,12 @@ describe("paa CLI", () => {
   test("未接続なら status は次の一手を示して失敗する", async () => {
     const result = await paa(["status"], { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-cli-")) });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("bun run paa login");
+    expect(result.stderr).toContain("atn login");
   }, 30_000);
 
-  test("案内どおり repo 直下の 'bun run paa' で起動できる", async () => {
+  test("案内どおり repo 直下の 'bun run atn' で起動できる", async () => {
     const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-    const proc = Bun.spawn(["bun", "run", "paa", "--help"], {
+    const proc = Bun.spawn(["bun", "run", "atn", "--help"], {
       cwd: repoRoot,
       env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
       stdout: "pipe",
@@ -91,12 +91,12 @@ describe("paa CLI", () => {
     });
     const stdout = await new Response(proc.stdout).text();
     expect(await proc.exited).toBe(0);
-    expect(stdout).toContain("bun run paa <command>");
+    expect(stdout).toContain("bun run atn <command>");
   }, 30_000);
 
   test("help を出せる", async () => {
     const result = await paa(["--help"]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("bun run paa <command>");
+    expect(result.stdout).toContain("bun run atn <command>");
   }, 30_000);
 });

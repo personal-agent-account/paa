@@ -42,11 +42,11 @@ describe("plugin bundle の同期 (PBI-0112)", () => {
   }, 120_000);
 
   test("PBI-0132: 両 plugin の launcher が source と byte 一致し、実行可能である", () => {
-    // bundle と同じ理由: cache は plugin dir だけを copy するので、source(packages/mcp/paa-mcp)と
+    // bundle と同じ理由: cache は plugin dir だけを copy するので、source(packages/mcp/atn-mcp)と
     // ずれると「install した環境でだけ起動しない」になる。実行権が落ちるのも同じ壊れ方
-    const source = readFileSync(join(repoRoot, "packages/mcp/paa-mcp"));
+    const source = readFileSync(join(repoRoot, "packages/mcp/atn-mcp"));
     for (const dir of ["adapters/official/claude", "adapters/official/codex"]) {
-      const copy = join(repoRoot, dir, "paa-mcp");
+      const copy = join(repoRoot, dir, "atn-mcp");
       expect(readFileSync(copy)).toEqual(source);
       expect(statSync(copy).mode & 0o111).toBeGreaterThan(0);
     }
@@ -59,10 +59,10 @@ describe("plugin bundle の同期 (PBI-0112)", () => {
     const codex = JSON.parse(
       readFileSync(join(repoRoot, "adapters/official/codex/.mcp.json"), "utf8"),
     ) as { mcp_servers: Record<string, { args: string[]; command: string }> };
-    expect(claude.mcpServers.paa!.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"]);
-    expect(codex.mcp_servers.paa!.args).toEqual(["${PLUGIN_ROOT}/mcp-server.bundle.js"]);
+    expect(claude.mcpServers.atn!.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/mcp-server.bundle.js"]);
+    expect(codex.mcp_servers.atn!.args).toEqual(["${PLUGIN_ROOT}/mcp-server.bundle.js"]);
     // PBI-0132: command 側は launcher。args(bundle)は fallback 経路の材料として残す
-    expect(claude.mcpServers.paa!.command).toBe("${CLAUDE_PLUGIN_ROOT}/paa-mcp");
-    expect(codex.mcp_servers.paa!.command).toBe("${PLUGIN_ROOT}/paa-mcp");
+    expect(claude.mcpServers.atn!.command).toBe("${CLAUDE_PLUGIN_ROOT}/atn-mcp");
+    expect(codex.mcp_servers.atn!.command).toBe("${PLUGIN_ROOT}/atn-mcp");
   });
 });

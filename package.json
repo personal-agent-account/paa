@@ -7,7 +7,7 @@
     "adapters/official/*"
   ],
   "scripts": {
-    "paa": "bun apps/cli/src/paa.ts",
+    "atn": "bun apps/cli/src/paa.ts",
     "plugin:build": "bun build packages/mcp/src/server.ts --target=bun --outfile adapters/official/claude/mcp-server.bundle.js && bun build packages/mcp/src/server.ts --target=bun --outfile adapters/official/codex/mcp-server.bundle.js && cp packages/mcp/paa-mcp adapters/official/claude/paa-mcp && cp packages/mcp/paa-mcp adapters/official/codex/paa-mcp && chmod +x adapters/official/claude/paa-mcp adapters/official/codex/paa-mcp",
     "build:binaries": "./scripts/build-binaries.sh",
     "test": "bun test",

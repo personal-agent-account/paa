@@ -61,12 +61,12 @@ type Poll =
 function unreachableDetail(baseUrl: string, e: unknown): string {
   const code = (e as { code?: unknown })?.code;
   const why = typeof code === "string" && code ? code : (e as Error)?.message ?? String(e);
-  return `${baseUrl} に接続できません(${why})`;
+  return `cannot connect to ${baseUrl} (${why})`;
 }
 
 /**
  * pair/start。claim と同じ一過性判定で最大 MAX_CONSECUTIVE_TRANSIENT 回まで撃ち直す —— 1 回目の
- * fetch が reject しただけで例外を上げると、`paa login` は NG 表示ではなく生の stack trace で
+ * fetch が reject しただけで例外を上げると、`atn login` は NG 表示ではなく生の stack trace で
  * 落ちる(PBI-0046 レビュー AC-X2)。server 指定の interval はまだ無いので固定の指数 backoff
  */
 async function startPairing(
@@ -84,13 +84,13 @@ async function startPairing(
         return { kind: "body", body: res.body };
       }
       if (res.status >= 500 || res.status === 429 || res.status === 408) {
-        detail = `pair/start が ${res.status} を返しました`;
+        detail = `pair/start returned ${res.status}`;
       } else if (res.status === 201) {
-        detail = "pair/start の応答が JSON ではありません";
+        detail = "pair/start did not return JSON";
       } else {
         return {
           kind: "failed",
-          detail: `pair/start が ${res.status} を返しました: ${JSON.stringify(res.body)}`,
+          detail: `pair/start returned ${res.status}: ${JSON.stringify(res.body)}`,
         };
       }
     } catch (e) {
@@ -98,7 +98,7 @@ async function startPairing(
     }
     transient++;
     if (transient >= MAX_CONSECUTIVE_TRANSIENT) {
-      return { kind: "failed", detail: `${detail}(${transient} 回連続)` };
+      return { kind: "failed", detail: `${detail} (${transient} times in a row)` };
     }
     await sleep(Math.min(START_BACKOFF_MS * 2 ** (transient - 1), MAX_BACKOFF_MS));
   }
@@ -112,17 +112,17 @@ async function pollClaim(baseUrl: string, deviceCode: string): Promise<Poll> {
     return { kind: "transient", detail: unreachableDetail(baseUrl, e) };
   }
   if (res.status >= 500 || res.status === 429 || res.status === 408) {
-    return { kind: "transient", detail: `pair/claim が ${res.status} を返しました` };
+    return { kind: "transient", detail: `pair/claim returned ${res.status}` };
   }
   if (res.status !== 200) {
     return {
       kind: "fatal",
-      detail: `pair/claim が ${res.status} を返しました: ${JSON.stringify(res.body)}`,
+      detail: `pair/claim returned ${res.status}: ${JSON.stringify(res.body)}`,
     };
   }
   // 200 でも本文が JSON として読めなければ(proxy が差し込んだ HTML 等)約束外
   if (res.body == null || typeof res.body !== "object") {
-    return { kind: "transient", detail: "pair/claim の応答が JSON ではありません" };
+    return { kind: "transient", detail: "pair/claim did not return JSON" };
   }
   return { kind: "body", body: res.body };
 }
@@ -160,7 +160,7 @@ export async function pairRuntime(options: PairOptions): Promise<PairOutcome> {
       if (transient >= MAX_CONSECUTIVE_TRANSIENT) {
         return {
           status: "failed",
-          detail: `${poll.detail}(${transient} 回連続)`,
+          detail: `${poll.detail} (${transient} times in a row)`,
         };
       }
     } else {
@@ -183,14 +183,14 @@ export async function pairRuntime(options: PairOptions): Promise<PairOutcome> {
       if (status !== "pending") {
         return {
           status: "failed",
-          detail: `pair/claim が未知の status を返しました: ${JSON.stringify(status)}`,
+          detail: `pair/claim returned an unknown status: ${JSON.stringify(status)}`,
         };
       }
     }
 
     if (now() >= deadline) {
       return transient > 0
-        ? { status: "failed", detail: `${lastTransient}(承認待ちの制限時間内に復旧しませんでした)` }
+        ? { status: "failed", detail: `${lastTransient} (did not recover within the approval window)` }
         : { status: "expired" };
     }
     // 一過性の失敗が続く間だけ間隔を伸ばす。正常な polling は interval を守る(§ server 指定)

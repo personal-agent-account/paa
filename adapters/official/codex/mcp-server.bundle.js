@@ -6925,7 +6925,7 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/pr
 import { homedir } from "os";
 import { dirname, join } from "path";
 function paaHome(env = process.env) {
-  return env.PAA_HOME ?? join(homedir(), ".paa");
+  return env.PAA_HOME ?? join(homedir(), ".atn");
 }
 function credentialsPath(env = process.env) {
   return join(paaHome(env), "credentials.json");
@@ -8935,7 +8935,7 @@ async function withLock(env, fn) {
         continue;
       }
       if (Date.now() > deadline) {
-        throw new Error(`device-keys store \u304C\u5225\u30D7\u30ED\u30BB\u30B9\u306B\u4F7F\u7528\u3055\u308C\u3066\u3044\u307E\u3059: ${lockPath}`);
+        throw new Error(`The device-keys store is in use by another process: ${lockPath}`);
       }
       await new Promise((r) => setTimeout(r, 20 + Math.floor(Math.random() * 40)));
     }
@@ -9009,14 +9009,28 @@ function toEnvelopePlaintext(c) {
     p.urls = c.urls;
   return p;
 }
+function plainString(v) {
+  return typeof v === "string" && v.trim() !== "" ? v : undefined;
+}
+function isRenderableUrl(u) {
+  return typeof u === "string" && /^(?:https?|mailto):/i.test(u);
+}
 function fromEnvelopePlaintext(p) {
   const c = {};
-  if (p.text !== undefined)
+  const title = plainString(p.title);
+  const body = plainString(p.body);
+  if (title !== undefined || body !== undefined) {
+    c.text = title !== undefined && body !== undefined ? `${title}
+${body}` : title ?? body;
+  } else if (typeof p.text === "string") {
     c.text = p.text;
-  if (p.files !== undefined)
-    c.files = p.files;
-  if (p.urls !== undefined)
-    c.urls = p.urls;
+  }
+  const files = (Array.isArray(p.files) ? p.files : []).filter((f) => !!f && typeof f.name === "string" && typeof f.ref === "string");
+  if (files.length > 0)
+    c.files = files;
+  const urls = [...Array.isArray(p.urls) ? p.urls : [], p.url].filter(isRenderableUrl);
+  if (urls.length > 0)
+    c.urls = urls;
   return c;
 }
 // packages/adapter/src/e2ee.ts
@@ -22054,21 +22068,34 @@ class StdioServerTransport {
   }
 }
 
-// packages/mcp/src/masking.ts
+// packages/mcp-mask/src/masking.ts
 import { existsSync, readFileSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
 import { join as join3 } from "path";
-var secretsPath = () => process.env.PAA_SECRETS_PATH ?? join3(homedir2(), ".paa", "secrets.json");
+var secretsPath = () => process.env.PAA_SECRETS_PATH ?? join3(homedir2(), ".atn", "secrets.json");
+function checkPermissions(path) {
+  const mode = statSync(path).mode & 511;
+  if (mode !== 384) {
+    throw new Error(`${path} has permission ${mode.toString(8)}. A file holding plaintext secrets must be readable by its owner only, 0600 (chmod 600 ${path})`);
+  }
+}
+function extractStrings(raw) {
+  if (Array.isArray(raw))
+    return raw.filter((v) => typeof v === "string" && v.length > 0);
+  if (raw !== null && typeof raw === "object") {
+    return Object.values(raw).filter((v) => typeof v === "string" && v.length > 0);
+  }
+  return [];
+}
+function longestFirst(values) {
+  return [...new Set(values)].sort((a, b) => b.length - a.length);
+}
 function loadSecrets(path = secretsPath()) {
   if (!existsSync(path))
     return [];
-  const mode = statSync(path).mode & 511;
-  if (mode !== 384) {
-    throw new Error(`${path} \u306E permission \u304C ${mode.toString(8)} \u3067\u3059\u3002secret \u3092\u5E73\u6587\u3067\u7F6E\u304F file \u306F\u6240\u6709\u8005\u306E\u307F\u8AAD\u3081\u308B 0600 \u3067\u3042\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059 (chmod 600 ${path})`);
-  }
+  checkPermissions(path);
   const raw = JSON.parse(readFileSync(path, "utf8"));
-  const values = Array.isArray(raw) ? raw.filter((v) => typeof v === "string" && v.length > 0) : raw !== null && typeof raw === "object" ? Object.values(raw).filter((v) => typeof v === "string" && v.length > 0) : [];
-  return [...new Set(values)].sort((a, b) => b.length - a.length);
+  return longestFirst(extractStrings(raw));
 }
 function maskText(text, secrets) {
   let out = text;
@@ -22111,35 +22138,35 @@ var sendInputShape = {
   text: exports_external.string().optional(),
   urls: exports_external.array(exports_external.string()).optional(),
   files: exports_external.array(fileRefShape).optional(),
-  force: exports_external.boolean().optional().describe("already_handled \u306E thread \u3078\u5F37\u5236\u9001\u4FE1")
+  force: exports_external.boolean().optional().describe("force-send to a thread that is already_handled")
 };
 var replyInputShape = {
-  thread_id: exports_external.string().describe("\u8FD4\u4FE1\u5148\u306E thread id(owner \u3068\u306E\u5171\u6709 thread \u542B\u3080)"),
+  thread_id: exports_external.string().describe("thread id to reply to (including the thread shared with the owner)"),
   text: exports_external.string().optional(),
   urls: exports_external.array(exports_external.string()).optional(),
   files: exports_external.array(fileRefShape).optional(),
-  force: exports_external.boolean().optional().describe("already_handled \u306E thread \u3078\u5F37\u5236\u9001\u4FE1"),
-  refs: exports_external.array(exports_external.string()).optional().describe("\u51E6\u7406\u3057\u305F notification item \u306E id(\xA718\u3002owner instruction thread \u3078\u306E\u5831\u544A\u3067\u53C2\u7167\u5148\u3092 done \u306B\u3059\u308B)")
+  force: exports_external.boolean().optional().describe("force-send to a thread that is already_handled"),
+  refs: exports_external.array(exports_external.string()).optional().describe("ids of the notification items that were handled (marks them done when reporting to the owner instruction thread)")
 };
 var labelInputShape = {
-  message_id: exports_external.string().describe("notification item \u306E message id"),
-  label: exports_external.enum(["action", "fyi", "discard"]).describe("action=\u8981\u5BFE\u5FDC / fyi=\u53C2\u8003 / discard=\u4E0D\u8981"),
-  summary: exports_external.string().optional().describe("\u77ED\u3044\u8981\u7D04(140 \u5B57\u4EE5\u5185\u63A8\u5968)\u3002MCP \u304C device \u9375\u3067 seal \u3057\u3066\u304B\u3089\u9001\u308B")
+  message_id: exports_external.string().describe("message id of the notification item"),
+  label: exports_external.enum(["action", "fyi", "discard"]).describe("action = needs handling / fyi = for information / discard = not needed"),
+  summary: exports_external.string().optional().describe("short summary (140 chars or less recommended). The MCP server seals it with the device key before sending")
 };
 var rulesPutInputShape = {
-  nl: exports_external.string().describe("owner \u306E\u8A00\u8449\u306E\u539F\u6587(\u4F8B: newsletter \u306F\u6BCE\u671D 9 \u6642\u306B\u307E\u3068\u3081\u3066)"),
+  nl: exports_external.string().describe("the owner's words verbatim (e.g. 'batch newsletters at 9 every morning')"),
   scope: exports_external.object({
     source_kind: exports_external.enum(["mail", "paa", "webhook", "android", "windows", "macos", "ios", "digest"]).optional(),
-    app_id: exports_external.string().optional().describe("\u767A\u751F\u6E90 app(\u4F8B: com.example.app)\u3002\u3053\u3053\u3067\u6307\u5B9A\u3057\u305F\u8A9E\u306F metadata \u3068\u3057\u3066\u5E73\u6587\u4FDD\u5B58\u3055\u308C\u308B"),
+    app_id: exports_external.string().optional().describe("source app (e.g. com.example.app). Values given here are stored in the clear as metadata"),
     time_window: exports_external.string().optional(),
-    sender: exports_external.string().optional().describe("\u672C\u6587\u30FB\u9001\u4FE1\u8005\u306E\u8A9E\u3002\u6307\u5B9A\u3059\u308B\u3068 content rule \u306B\u306A\u308A server \u306B\u306F\u6697\u53F7\u5316\u3055\u308C\u3066\u4FDD\u5B58\u3055\u308C\u308B"),
-    keywords: exports_external.array(exports_external.string()).optional().describe("\u672C\u6587\u306E\u8A9E\u3002\u6307\u5B9A\u3059\u308B\u3068 content rule \u306B\u306A\u308B")
+    sender: exports_external.string().optional().describe("a sender term. Setting it makes this a content rule, stored encrypted on the server"),
+    keywords: exports_external.array(exports_external.string()).optional().describe("body terms. Setting them makes this a content rule")
   }).optional(),
   action: exports_external.object({
     type: exports_external.enum(["immediate", "digest", "discard", "cloud_visibility"]),
-    schedule: exports_external.string().optional().describe("digest \u7528\u300CHH:MM\u300D(\u4F8B: 09:00)"),
-    tz: exports_external.string().optional().describe("digest \u7528 IANA tz(\u4F8B: Asia/Tokyo\u3002\u65E2\u5B9A UTC)"),
-    visibility: exports_external.enum(["full", "masked", "local_only", "none"]).optional().describe("cloud_visibility \u7528")
+    schedule: exports_external.string().optional().describe('"HH:MM" for digests (e.g. 09:00)'),
+    tz: exports_external.string().optional().describe("IANA timezone for digests (e.g. America/Los_Angeles; default UTC)"),
+    visibility: exports_external.enum(["full", "masked", "local_only", "none"]).optional().describe("for cloud_visibility")
   })
 };
 
@@ -22253,8 +22280,8 @@ var kind = process.env.PAA_RUNTIME_KIND;
 var stored = kind ? await getCredential(kind) : undefined;
 var token = process.env.PAA_TOKEN ?? stored?.token;
 if (!token) {
-  console.error(`PAA credential \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093 (PAA_RUNTIME_KIND=${kind ?? "\u672A\u8A2D\u5B9A"}, ${credentialsPath()})
-` + "PAA repo \u76F4\u4E0B\u3067 'bun run paa install claude' / 'bun run paa install codex' \u3092\u5B9F\u884C\u3057\u3066 pairing \u3057\u3066\u304F\u3060\u3055\u3044");
+  console.error(`No All Together Now credential was found (PAA_RUNTIME_KIND=${kind ?? "unset"}, ${credentialsPath()})
+` + "Run 'atn install claude' / 'atn install codex' to pair this runtime first");
   process.exit(1);
 }
 var tools = createAccountTools({
@@ -22267,30 +22294,30 @@ var secrets;
 try {
   secrets = loadSecrets();
 } catch (e) {
-  console.error(`secrets.json \u3092\u8AAD\u3081\u307E\u305B\u3093: ${e instanceof Error ? e.message : String(e)}`);
+  console.error(`Could not read secrets.json: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);
 }
-var server = new McpServer({ name: "paa-account", version: "0.1.0" });
+var server = new McpServer({ name: "atn-account", version: "0.2.0" });
 var json = (v) => ({
   content: [{ type: "text", text: JSON.stringify(maskValue(v, secrets), null, 2) }]
 });
-server.tool("whoami", "attach \u3057\u3066\u3044\u308B Agent Account \u306E identity \u3068\u672A\u8AAD\u6570\u3092\u8FD4\u3059", {}, async () => json(await tools.whoami()));
-server.tool("inbox_list", "\u53D7\u4FE1 message \u306E metadata \u4E00\u89A7(\u672C\u6587\u306A\u3057)\u3002\u672C\u6587\u306F inbox_read \u3067\u53D6\u5F97\u3059\u308B", {}, async () => json(await tools.inbox_list()));
-server.tool("inbox_read", "message_id \u3092\u6307\u5B9A\u3057\u3066\u672C\u6587\u3092\u8AAD\u3080", { message_id: exports_external.string() }, async ({ message_id }) => json(await tools.inbox_read(message_id)));
-server.tool("send", "@handle \u5B9B\u306B message \u3092\u9001\u308B\u3002delegation policy \u306B\u3088\u308A\u627F\u8A8D\u5F85\u3061(pending_approval)\u306B\u306A\u308B\u3053\u3068\u304C\u3042\u308B", sendInputShape, async (input) => json(await tools.send({
+server.tool("whoami", "Identity of the attached agent account and its unread count", {}, async () => json(await tools.whoami()));
+server.tool("inbox_list", "List received messages (metadata only, no bodies). Use inbox_read for the body", {}, async () => json(await tools.inbox_list()));
+server.tool("inbox_read", "Read a message body by message_id", { message_id: exports_external.string() }, async ({ message_id }) => json(await tools.inbox_read(message_id)));
+server.tool("send", "Send a message to an @handle. The delegation policy may put it in pending_approval", sendInputShape, async (input) => json(await tools.send({
   ...input,
   text: input.text !== undefined ? restoreText(input.text, secrets) : undefined
 })));
-server.tool("reply", "\u81EA\u5206\u306E Account \u5185\u306E thread \u306B\u8FD4\u4FE1\u3059\u308B(owner \u3068\u306E\u5171\u6709 thread\u3002owner instruction \u306E\u7D50\u679C\u5831\u544A\u5148)", replyInputShape, async (input) => json(await tools.reply({
+server.tool("reply", "Reply in a thread inside your own account (the thread shared with the owner \u2014 where owner instructions are reported back)", replyInputShape, async (input) => json(await tools.reply({
   ...input,
   text: input.text !== undefined ? restoreText(input.text, secrets) : undefined
 })));
-server.tool("agents_list", "\u3053\u306E Account \u304B\u3089\u8A71\u3057\u304B\u3051\u3089\u308C\u308B\u76F8\u624B\u306E\u4E00\u89A7\u3002runtimes = \u540C\u3058 Account \u306E runtime(name / kind / is_default / live = \u4ECA wake \u304C\u5C4A\u304F\u304B)\u3001contacts = \u5B9B\u5148(address \u306F send \u306E to \u306B\u305D\u306E\u307E\u307E\u6E21\u305B\u308B)\u3002\u76F8\u624B Account \u306E\u7A3C\u50CD\u72B6\u614B\u306F\u8FD4\u3055\u306A\u3044(\u8A2D\u8A08\u4E0A\u306E\u975E\u516C\u958B)", {}, async () => json(await tools.agents_list()));
-server.tool("contacts_list", "contacts \u4E00\u89A7", {}, async () => json(await tools.contacts_list()));
-server.tool("contacts_get", "contact 1 \u4EF6\u3092\u53D6\u5F97", { contact_id: exports_external.string() }, async ({ contact_id }) => json(await tools.contacts_get(contact_id)));
-server.tool("mark_read", "message \u3092\u65E2\u8AAD\u306B\u3059\u308B(\u3053\u306E runtime \u306E read state \u306E\u307F\u5909\u308F\u308B)", { message_id: exports_external.string() }, async ({ message_id }) => json(await tools.mark_read(message_id)));
-server.tool("approval_get", "\u81EA\u5206\u304C\u8D77\u3053\u3057\u305F approval(send/reply \u306E\u627F\u8A8D\u5F85\u3061)\u306E\u72B6\u614B\u3092\u53D6\u5F97\u3059\u308B\u3002pending/approved/rejected\u3002content \u306F\u542B\u307E\u306A\u3044", { approval_id: exports_external.string() }, async ({ approval_id }) => json(await tools.approval_get(approval_id)));
-server.tool("notification_label", "notification item \u306B triage label \u3092\u4ED8\u3051\u308B(action=\u8981\u5BFE\u5FDC / fyi=\u53C2\u8003 / discard=\u4E0D\u8981)\u3002summary \u306F device \u9375\u3067 seal \u3057\u3066\u9001\u308B", labelInputShape, async ({ message_id, label, summary }) => json(await tools.notification_label(message_id, label, summary)));
-server.tool("rules_put", "owner \u304C\u8A00\u8449\u3067\u983C\u3093\u3060\u634C\u304D\u65B9\u3092 rule \u3068\u3057\u3066\u4FDD\u5B58\u3059\u308B(nl = \u8A00\u8449\u306E\u539F\u6587\u30FBscope = \u5BFE\u8C61\u30FBaction = \u634C\u304D\u65B9)\u3002server \u304C\u6B63\u898F\u5316\u3057\u3066 layer(metadata / content)\u3092\u6C7A\u3081\u3001\u6B63\u898F\u5316\u6E08\u307F rule \u3092\u8FD4\u3059 \u2014\u2014 \u8FD4\u3063\u3066\u304D\u305F rule \u306E\u5185\u5BB9\u3092 owner \u306B 1 \u6587\u3067\u78BA\u8A8D(echo)\u3059\u308B\u3053\u3068\u3002\u540C\u3058 nl \u306E\u518D put \u306F\u4E0A\u66F8\u304D\u66F4\u65B0\u306B\u306A\u308B(rule \u306F\u5897\u3048\u306A\u3044)\u3002sender / keywords \u3092 scope \u306B\u5165\u308C\u308B\u3068 content rule \u306B\u306A\u308A server \u306B\u306F\u6697\u53F7\u5316\u3055\u308C\u3066\u4FDD\u5B58\u3055\u308C\u308B", rulesPutInputShape, async (input) => json(await tools.rules_put(input)));
-server.tool("rules_list", "\u4FDD\u5B58\u6E08\u307F rule \u306E\u4E00\u89A7\u3002content rule \u306E scope \u306F device \u9375\u3067\u5FA9\u5143\u3057\u3066\u8FD4\u3059", {}, async () => json(await tools.rules_list()));
+server.tool("agents_list", "Who this account can talk to. runtimes = runtimes of the same account (name / kind / is_default / live = whether a wake reaches it now); contacts = addresses (pass address straight to send's to). The other account's liveness is never returned (by design)", {}, async () => json(await tools.agents_list()));
+server.tool("contacts_list", "List contacts", {}, async () => json(await tools.contacts_list()));
+server.tool("contacts_get", "Get one contact", { contact_id: exports_external.string() }, async ({ contact_id }) => json(await tools.contacts_get(contact_id)));
+server.tool("mark_read", "Mark a message as read (only this runtime's read state changes)", { message_id: exports_external.string() }, async ({ message_id }) => json(await tools.mark_read(message_id)));
+server.tool("approval_get", "Status of an approval you raised (a send/reply awaiting approval): pending / approved / rejected. Content is not included", { approval_id: exports_external.string() }, async ({ approval_id }) => json(await tools.approval_get(approval_id)));
+server.tool("notification_label", "Put a triage label on a notification item (action = needs handling / fyi = for information / discard = not needed). The summary is sealed with the device key before sending", labelInputShape, async ({ message_id, label, summary }) => json(await tools.notification_label(message_id, label, summary)));
+server.tool("rules_put", "Save how the owner asked to handle things as a rule (nl = their words verbatim, scope = what it applies to, action = what to do). The server normalizes it, picks the layer (metadata / content) and returns the normalized rule \u2014 echo it back to the owner in one sentence. Putting the same nl again updates in place (no duplicate rules). sender / keywords in scope make it a content rule, stored encrypted on the server", rulesPutInputShape, async (input) => json(await tools.rules_put(input)));
+server.tool("rules_list", "List saved rules. The scope of content rules is restored with the device key", {}, async () => json(await tools.rules_list()));
 await server.connect(new StdioServerTransport);

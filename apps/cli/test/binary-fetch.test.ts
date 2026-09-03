@@ -15,7 +15,7 @@ import {
   type RuntimeAdapter,
 } from "@paa/adapter";
 
-// PBI-0137 AC-2〜7 / X1〜X3: 公開 Release から binary を取ってきて `~/.paa/bin` に置く。
+// PBI-0137 AC-2〜7 / X1〜X3: 公開 Release から binary を取ってきて `~/.atn/bin` に置く。
 // stub の Release server から偽 binary を配り、**実際に置かれた file** を見る。
 //
 // 失敗は全部 bun 経路への fallback に倒す(network が無いだけで install を失敗させない)。
@@ -23,7 +23,7 @@ import {
 
 const VERSION = "9.9.9";
 const TARGET = binaryTarget()!; // host の target(darwin-arm64 等)
-const ASSET = `paa-mcp-${TARGET}`;
+const ASSET = `atn-mcp-${TARGET}`;
 const BODY = "#!/bin/sh\necho fake-binary\n";
 const SHA = new Bun.CryptoHasher("sha256").update(new TextEncoder().encode(BODY)).digest("hex");
 
@@ -64,7 +64,7 @@ const envFor = (extra: Record<string, string> = {}) => ({
   PAA_BINARY_VERSION: VERSION,
   ...extra,
 });
-const binPath = () => join(home, "bin", "paa-mcp");
+const binPath = () => join(home, "bin", "atn-mcp");
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "paa-binfetch-"));
@@ -84,7 +84,7 @@ async function leftovers(): Promise<string[]> {
 
 describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   test("AC-2: bin が空・network 有りなら download して実行可能な状態で置く", async () => {
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome).toMatchObject({ status: "downloaded", path: binPath(), target: TARGET });
 
     expect(await readFile(binPath(), "utf8")).toBe(BODY);
@@ -94,7 +94,7 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   });
 
   test("AC-3: 置いた後は MCP 設定の command が binary になる(bun を含まない)", async () => {
-    await ensureBinary("paa-mcp", { env: envFor() });
+    await ensureBinary("atn-mcp", { env: envFor() });
     const resolved = resolveMcpServerCommand("/repo/packages/mcp/src/server.ts", envFor());
     expect(resolved).toEqual({ command: binPath(), args: [] });
     expect(JSON.stringify(resolved)).not.toContain("bun");
@@ -102,7 +102,7 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
 
   test("AC-4: checksum 不一致なら置かない(中途半端な file も残さない)", async () => {
     mode = "bad-checksum";
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome.status).toBe("checksum_mismatch");
     expect(await Bun.file(binPath()).exists()).toBe(false);
     expect(await leftovers()).toEqual([]);
@@ -111,7 +111,7 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   });
 
   test("AC-5: 取れない(server 断)なら unavailable に倒れ、置かない", async () => {
-    const outcome = await ensureBinary("paa-mcp", {
+    const outcome = await ensureBinary("atn-mcp", {
       env: envFor({ PAA_BINARY_BASE_URL: "http://127.0.0.1:1" }),
     });
     expect(outcome.status).toBe("unavailable");
@@ -119,7 +119,7 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   });
 
   test("AC-6: 未対応 OS/arch なら取りに行かない(request 0)", async () => {
-    const outcome = await ensureBinary("paa-mcp", {
+    const outcome = await ensureBinary("atn-mcp", {
       env: envFor(),
       platform: "win32",
       arch: "arm64",
@@ -130,15 +130,15 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   });
 
   test("AC-7: 同じ version が置いてあれば再 download しない", async () => {
-    await ensureBinary("paa-mcp", { env: envFor() });
+    await ensureBinary("atn-mcp", { env: envFor() });
     const after = requests.length;
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome).toMatchObject({ status: "present", path: binPath() });
     expect(requests.length).toBe(after);
   });
 
   test("AC-X1: 公開 Release だけを叩く(Authorization を送らない)・permission は 0755", async () => {
-    await ensureBinary("paa-mcp", { env: envFor() });
+    await ensureBinary("atn-mcp", { env: envFor() });
     expect(authHeaders).toEqual([]);
     expect((await stat(join(home, "bin"))).mode & 0o777).toBe(0o755);
     expect((await stat(binPath())).mode & 0o777).toBe(0o755);
@@ -146,21 +146,21 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
 
   test("AC-X2: download が中断したら中途半端な file を残さない", async () => {
     // 中断は「全部は届かなかった bytes」として現れる。checksum がそれを掴み、
-    // tmp → rename なので `~/.paa/bin/paa-mcp` は最後まで存在しない
+    // tmp → rename なので `~/.atn/bin/atn-mcp` は最後まで存在しない
     mode = "truncate";
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome.status).toBe("checksum_mismatch");
     expect(await Bun.file(binPath()).exists()).toBe(false);
     expect(await leftovers()).toEqual([]);
 
     // 次の試行は普通に成功する(壊れた印が残って詰まらない)
     mode = "ok";
-    expect((await ensureBinary("paa-mcp", { env: envFor() })).status).toBe("downloaded");
+    expect((await ensureBinary("atn-mcp", { env: envFor() })).status).toBe("downloaded");
   });
 
   test("AC-X3: SHA256SUMS が無ければ binary を引かない(照合を必ず通す)", async () => {
     mode = "no-sums";
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome.status).toBe("unavailable");
     expect(requests).toEqual([`/v${VERSION}/SHA256SUMS`]); // asset 本体は引いていない
     expect(await Bun.file(binPath()).exists()).toBe(false);
@@ -169,13 +169,13 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
   // ---- 攻撃 ----
   test("攻撃: 似た名前の行(<asset>-old)の hash を掴まない", async () => {
     // SHA256SUMS の 1 行目は `<asset>-old`。部分一致で拾う実装ならここで checksum_mismatch になる
-    expect((await ensureBinary("paa-mcp", { env: envFor() })).status).toBe("downloaded");
+    expect((await ensureBinary("atn-mcp", { env: envFor() })).status).toBe("downloaded");
   });
 
   test("攻撃: 版の印だけ在って binary が消えていれば取り直す", async () => {
     await mkdir(join(home, "bin"), { recursive: true });
     await writeFile(`${binPath()}.version`, `${VERSION}\n`);
-    const outcome = await ensureBinary("paa-mcp", { env: envFor() });
+    const outcome = await ensureBinary("atn-mcp", { env: envFor() });
     expect(outcome.status).toBe("downloaded");
     expect(await Bun.file(binPath()).exists()).toBe(true);
   });
@@ -185,7 +185,7 @@ describe("ensureBinary — 取得と検証 (PBI-0137)", () => {
     await writeFile(binPath(), "old");
     await chmod(binPath(), 0o755);
     await writeFile(`${binPath()}.version`, "0.0.1\n");
-    expect((await ensureBinary("paa-mcp", { env: envFor() })).status).toBe("downloaded");
+    expect((await ensureBinary("atn-mcp", { env: envFor() })).status).toBe("downloaded");
     expect(await readFile(binPath(), "utf8")).toBe(BODY);
     expect((await readFile(`${binPath()}.version`, "utf8")).trim()).toBe(VERSION);
   });
@@ -238,7 +238,7 @@ async function installWith(env: Record<string, string>) {
   });
 }
 
-describe("paa install からの取得 (PBI-0137)", () => {
+describe("atn install からの取得 (PBI-0137)", () => {
   test("AC-2/3: install が binary を置き、finding にそれを出す", async () => {
     const outcome = await installWith(envFor());
     expect(outcome.status).toBe("installed");
@@ -255,21 +255,21 @@ describe("paa install からの取得 (PBI-0137)", () => {
     const outcome = await installWith(envFor({ PAA_BINARY_BASE_URL: "http://127.0.0.1:1" }));
     expect(outcome.status).toBe("installed");
     const finding = outcome.status === "installed" && outcome.findings[0];
-    // ここを ok:false にすると network が無いだけで `paa install` が exit 1 になる
+    // ここを ok:false にすると network が無いだけで `atn install` が exit 1 になる
     expect(finding).toMatchObject({ ok: true, label: "MCP binary" });
-    expect(finding && finding.detail).toContain("bun 経路");
+    expect(finding && finding.detail).toContain("bun path");
   });
 });
 
 // ---- launcher の最後の手段(sh 側の取得) ----
 
 const LAUNCHER = fileURLToPath(
-  new URL("../../../adapters/official/claude/paa-mcp", import.meta.url),
+  new URL("../../../adapters/official/claude/atn-mcp", import.meta.url),
 );
 
 describe("launcher の最後の手段 (PBI-0137)", () => {
   test("binary も bun も無ければ Release から取ってきて exec する", async () => {
-    // これが「end user の bun 依存 0」の芯: plugin だけ入れた人は `paa install` を走らせない
+    // これが「end user の bun 依存 0」の芯: plugin だけ入れた人は `atn install` を走らせない
     const empty = join(home, "empty-path");
     const marker = join(home, "exec.log");
     await mkdir(empty, { recursive: true });
@@ -317,7 +317,7 @@ describe("launcher の最後の手段 (PBI-0137)", () => {
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe(""); // MCP は stdio。失敗経路でも 1 byte も出さない
-    expect(stderr).toContain("公開 Release からの自動取得も試しました");
+    expect(stderr).toContain("fetching it from the public Release was also tried");
     expect(await Bun.file(binPath()).exists()).toBe(false);
     expect(await leftovers()).toEqual([]);
   }, 60_000);
@@ -338,7 +338,7 @@ describe("release workflow の形 (PBI-0137 AC-1)", () => {
 
     // asset 名は取得側(ensureBinary / launcher)が組み立てる名前と一致していなければ 404 になる
     for (const target of ["darwin-arm64", "darwin-x64", "linux-x64"]) {
-      for (const name of ["paa-mcp", "paa"]) {
+      for (const name of ["atn-mcp", "atn"]) {
         expect(yml).toContain(`dist/${name}-${target}`);
       }
     }

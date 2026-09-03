@@ -58,7 +58,7 @@ describe("session brief", () => {
     const brief = buildBrief({ ...whoami, unread: 25 }, messages);
     expect(brief.senders).toEqual([]);
     expect(formatBrief(brief)).toBe(
-      ["Attached as @aya", "Unread: 25", "- ほか ×25", "- (requests: 1)"].join("\n"),
+      ["Attached as @aya", "Unread: 25", "- and 25 more", "- (requests: 1)"].join("\n"),
     );
   });
 
@@ -71,12 +71,12 @@ describe("session brief", () => {
     }));
     const brief = buildBrief({ ...whoami, unread: 60 }, messages);
     expect(formatBrief(brief)).toBe(
-      ["Attached as @aya", "Unread: 60", "- Alice ×50", "- ほか ×10"].join("\n"),
+      ["Attached as @aya", "Unread: 60", "- Alice ×50", "- and 10 more"].join("\n"),
     );
   });
 
   test("AC-3: window が全未読を覆っていれば「ほか」は出ない", () => {
-    expect(formatBrief(buildBrief(whoami, messages))).not.toContain("ほか");
+    expect(formatBrief(buildBrief(whoami, messages))).not.toContain(" more");
   });
 });
 

@@ -1,8 +1,8 @@
-// paa-mask の masking 本体(PBI-0177)。PAA の MCP server 内蔵 masking(旧 packages/mcp/src/masking.ts・
+// atn-mask の masking 本体(PBI-0177)。PAA の MCP server 内蔵 masking(旧 packages/mcp/src/masking.ts・
 // REQ-69)から移設し、単体 OSS として切り出した — PAA の account 無しで今日から入れられる、
 // 「Claude にも Codex にも同じに効く秘匿」を単体で体験できる導線にする(3 点の②)。
 //
-// 秘匿の源は 3 つ(~/.paa/secrets.json・0600 必須):
+// 秘匿の源は 3 つ(~/.atn/secrets.json・0600 必須):
 //   SECRETS  — credential 文字列(現行のまま。配列 or object どちらでも受ける)
 //   PRIVATE  — user 辞書(人名・住所など任意文字列。SECRETS と同じ扱いで静的に mask する)
 //   PATTERNS — 既定 on の形パターン(email・電話・card 番号・鍵形)。値は事前に知らなくても
@@ -17,13 +17,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export const secretsPath = (): string =>
-  process.env.PAA_SECRETS_PATH ?? join(homedir(), ".paa", "secrets.json");
+  process.env.PAA_SECRETS_PATH ?? join(homedir(), ".atn", "secrets.json");
 
 function checkPermissions(path: string): void {
   const mode = statSync(path).mode & 0o777;
   if (mode !== 0o600) {
     throw new Error(
-      `${path} の permission が ${mode.toString(8)} です。secret を平文で置く file は所有者のみ読める 0600 である必要があります (chmod 600 ${path})`,
+      `${path} has permission ${mode.toString(8)}. A file holding plaintext secrets must be readable by its owner only, 0600 (chmod 600 ${path})`,
     );
   }
 }

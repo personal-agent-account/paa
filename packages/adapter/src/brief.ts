@@ -59,7 +59,7 @@ export function formatBrief(brief: SessionBrief): string {
   const lines = [`Attached as @${brief.handle}`, `Unread: ${brief.unread}`];
   for (const s of brief.senders) lines.push(`- ${s.name} ×${s.count}`);
   const shown = brief.senders.reduce((n, s) => n + s.count, 0);
-  if (brief.unread > shown) lines.push(`- ほか ×${brief.unread - shown}`);
+  if (brief.unread > shown) lines.push(`- and ${brief.unread - shown} more`);
   if (brief.requests > 0) lines.push(`- (requests: ${brief.requests})`);
   return lines.join("\n");
 }

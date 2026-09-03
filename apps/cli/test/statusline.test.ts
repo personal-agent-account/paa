@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { saveCredential } from "@paa/adapter";
 
 // PBI-0130: Claude Code の statusline に未読を出す。
-//  - `paa statusline --refresh` が cache を atomic に更新する(AC-4)
+//  - `atn statusline --refresh` が cache を atomic に更新する(AC-4)
 //  - 引数なしは cache を読むだけ(HTTP を叩かない・AC-5)
 //  - server 断でも既存 cache を壊さない(AC-X2)
 //  - statusline.sh は cache が新鮮なら bun を起こさない(AC-6)、無ければ空 + exit 0(AC-7/X3)
@@ -70,7 +70,7 @@ async function setupHome(baseUrl: string) {
   return home;
 }
 
-describe("PBI-0130 paa statusline", () => {
+describe("PBI-0130 atn statusline", () => {
   test("AC-4: --refresh が未読件数の segment を出し、cache に同じ内容を書く", async () => {
     const home = await setupHome(`http://localhost:${stub.port}`);
     const res = await run(["bun", CLI, "statusline", "--refresh"], { PAA_HOME: home });

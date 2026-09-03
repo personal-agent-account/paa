@@ -7,7 +7,7 @@ import {
 } from "@paa/adapter";
 import type { MessageContent } from "@paa/core";
 
-// `paa agent <provider>` —— 外部 API provider を「端末で動く runtime」として扱う本体
+// `atn agent <provider>` —— 外部 API provider を「端末で動く runtime」として扱う本体
 // (EP-0009 B / PBI-0057)。E2EE(アーキ §9)により server は本文を復号できないので、
 // provider API を呼べるのは device key を持つ端末側だけ。ここは **1 turn の下書き** に
 // 徹する: tool 実行・自律 loop・streaming は持たない(要件 §35 Model router にしない)。
@@ -35,8 +35,8 @@ export const isAgentProvider = (p: string): p is AgentProvider => p in PROVIDERS
 export const agentKind = (provider: AgentProvider): string => `${provider}-api`;
 
 const SYSTEM_PROMPT =
-  "あなたはこの Account の代理として、受け取ったメッセージへの返信の下書きを 1 通だけ書きます。" +
-  "本文だけを返し、前置き・署名・宛名の繰り返しは書かないでください。";
+  "You act on behalf of this account. Write exactly one draft reply to the message you received. " +
+  "Return only the body — no preamble, no signature, and do not repeat the salutation.";
 
 export interface AgentOptions {
   provider: AgentProvider;
@@ -89,20 +89,20 @@ async function resolveApiKey(
     }
     if (res.status === 202) {
       if (waitSec <= 0) {
-        return { ok: false, detail: `承認待ちです(approval_id=${res.body?.approval_id})` };
+        return { ok: false, detail: `waiting for approval (approval_id=${res.body?.approval_id})` };
       }
-      log(`${provider} の API key の利用に承認が必要です。承認を待っています...`);
+      log(`Using the ${provider} API key needs approval. Waiting for approval...`);
       const approvalId = res.body?.approval_id as string | undefined;
       // 承認されると次の resolve が 200 を返す(approved 行を消費する)ので、
       // ここでは approval の状態だけを見て「待つのをやめる条件」を判定する
       for (;;) {
-        if (Date.now() > deadline) return { ok: false, detail: "承認待ちが時間切れです" };
+        if (Date.now() > deadline) return { ok: false, detail: "timed out waiting for approval" };
         await new Promise((r) => setTimeout(r, APPROVAL_POLL_INTERVAL_MS));
         if (!approvalId) break;
         const st = await apiCall(baseUrl, `/v1/approvals/${approvalId}`, { token });
         if (st.status !== 200) break;
         if (st.body?.status === "approved") break;
-        if (st.body?.status === "rejected") return { ok: false, detail: "承認が拒否されました" };
+        if (st.body?.status === "rejected") return { ok: false, detail: "approval was rejected" };
       }
       continue;
     }
@@ -151,7 +151,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
   if (!credential) {
     return {
       status: "failed",
-      detail: `${opts.provider} は未接続です。'bun run paa login' でこの Mac を接続してください`,
+      detail: `${opts.provider} is not connected. Run 'atn login' to connect this machine`,
     };
   }
   const { base_url: baseUrl, token } = credential;
@@ -163,7 +163,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
 
   const threadRes = await apiCall(baseUrl, `/v1/threads/${opts.threadId}`, { token });
   if (threadRes.status !== 200) {
-    return { status: "failed", detail: `thread を読めません(${threadRes.status})` };
+    return { status: "failed", detail: `could not read the thread (${threadRes.status})` };
   }
   const peerHandle = threadRes.body?.peer_handle as string | null;
   const messages = (threadRes.body?.messages ?? []) as ThreadMessage[];
@@ -177,7 +177,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
     history.push({ role: m.direction === "in" ? "user" : "assistant", content: text });
   }
   if (history.length === 0) {
-    return { status: "failed", detail: "この端末で読める本文がありません" };
+    return { status: "failed", detail: "no message body this device can read" };
   }
 
   const key = await resolveApiKey(baseUrl, token, opts.provider, opts.waitSec ?? 300, log);
@@ -202,7 +202,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
   }
   if (reply.status === 409) return { status: "already_handled" };
   if (reply.status !== 202 && reply.status !== 200) {
-    return { status: "failed", detail: `reply に失敗しました(${reply.status})` };
+    return { status: "failed", detail: `reply failed (${reply.status})` };
   }
   if (reply.body?.status === "ask_approval_required") {
     return { status: "ask_approval_required", approvalId: reply.body?.approval_id };

@@ -2,13 +2,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSecrets, maskText, maskValue, restoreText, secretsPath } from "../src/masking.ts";
+import { loadSecrets, maskText, maskValue, restoreText, secretsPath } from "atn-mask";
 
 // REQ-69(PBI-0117): secrets.json(0600)の読み込み、`⟨s:n⟩` の長い順安定割当、値だけの deep mask、
 // そして restore との対。mask は「tool 応答 → agent の context」面、restore は「agent → send/reply」面。
 
 describe("loadSecrets", () => {
-  const dir = mkdtempSync(join(tmpdir(), "paa-mask-"));
+  const dir = mkdtempSync(join(tmpdir(), "atn-mask-"));
   const path = join(dir, "secrets.json");
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }));

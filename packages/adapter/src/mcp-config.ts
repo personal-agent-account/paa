@@ -34,7 +34,7 @@ export interface McpServerCommand {
   args: string[];
 }
 
-/** 実行可能な **file** か。dir は X_OK が立つので除く(`~/.paa/bin/paa-mcp` が dir でも exec できない) */
+/** 実行可能な **file** か。dir は X_OK が立つので除く(`~/.atn/bin/atn-mcp` が dir でも exec できない) */
 function isExecutableFile(path: string): boolean {
   try {
     if (!statSync(path).isFile()) return false;
@@ -47,19 +47,19 @@ function isExecutableFile(path: string): boolean {
 
 /**
  * MCP server の起動 command を解決する(PBI-0132)。
- * `PAA_MCP_BINARY` → `<PAA_HOME>/bin/paa-mcp` → `bun <entry>` の順で、**実際に実行できる物だけ**を
+ * `PAA_MCP_BINARY` → `<PAA_HOME>/bin/atn-mcp` → `bun <entry>` の順で、**実際に実行できる物だけ**を
  * 採る —— 指定された path が無い / 実行権が無い時に黙って次へ落ちるのは、存在しない command を
  * runtime の config に書き込むと「登録は成功したのに起動だけ静かに失敗する」形になるため。
  *
  * bun は最後の fallback = 「開発者が使う道具」に降りる。binary が置かれている環境では bun を呼ばない。
- * plugin 側の同じ順序は `packages/mcp/paa-mcp`(sh launcher)が持つ —— 静的 JSON は分岐できないので、
+ * plugin 側の同じ順序は `packages/mcp/atn-mcp`(sh launcher)が持つ —— 静的 JSON は分岐できないので、
  * **判定は 2 箇所にあるが順序は 1 つ**(検査で両方を固定する)。
  */
 export function resolveMcpServerCommand(
   serverEntry: string,
   env: Record<string, string | undefined> = process.env,
 ): McpServerCommand {
-  for (const candidate of [env.PAA_MCP_BINARY, join(paaHome(env), "bin", "paa-mcp")]) {
+  for (const candidate of [env.PAA_MCP_BINARY, join(paaHome(env), "bin", "atn-mcp")]) {
     if (candidate && isExecutableFile(candidate)) return { command: candidate, args: [] };
   }
   return { command: "bun", args: [serverEntry] };
@@ -93,7 +93,7 @@ export interface McpConfigSpec {
 
 /**
  * config の MCP server 名一覧。**読めない / 壊れている時は空**を返す(= 「登録されていない」)。
- * ここで throw すると `paa doctor` が生の stack trace で落ちる —— doctor は「無い」と言って
+ * ここで throw すると `atn doctor` が生の stack trace で落ちる —— doctor は「無い」と言って
  * install の案内に繋ぐのが仕事なので、config が無いことは失敗ではない。
  */
 async function readServerNames(spec: McpConfigSpec, ctx: AdapterContext): Promise<string[]> {
@@ -158,10 +158,10 @@ export function createMcpConfigAdapter(spec: McpConfigSpec): RuntimeAdapter {
       return [
         {
           ok: registered,
-          label: `${spec.displayName} の MCP 登録`,
+          label: `${spec.displayName} MCP registration`,
           detail: registered
-            ? `${path} に "${serverName}"`
-            : `${path} に "${serverName}" がありません。'bun run paa install ${spec.id}' を実行してください`,
+            ? `"${serverName}" in ${path}`
+            : `"${serverName}" is missing from ${path}. Run 'atn install ${spec.id}'`,
         },
       ];
     },
@@ -185,7 +185,7 @@ export function createMcpConfigAdapter(spec: McpConfigSpec): RuntimeAdapter {
       }
       const s = action.spec as { command?: unknown; args?: unknown };
       if (typeof s.command !== "string") {
-        throw new Error(`extension "${action.name}" の spec.command が文字列ではありません`);
+        throw new Error(`extension "${action.name}": spec.command is not a string`);
       }
       await removeThenAdd(ctx, {
         name: action.name,

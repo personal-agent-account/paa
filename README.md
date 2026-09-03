@@ -1,9 +1,11 @@
-# Personal Agent Account (PAA)
+# All Together Now
+
+*A personal agent account — one `@handle` your AI runtimes attach to.*
 
 **Status: Public Alpha / experimental.** APIs, wire formats, and adapter contracts here
 are expected to change. This repository is the SDK / CLI / runtime-adapter / device-broker
-side of PAA; the Hosted Account Network (identity registry, encrypted mailbox storage,
-abuse/ops) is not part of this repository and is not open source.
+side of All Together Now; the Hosted Account Network (identity registry, encrypted mailbox
+storage, abuse/ops) is not part of this repository and is not open source.
 
 ## One agent. Any runtime. Always reachable.
 
@@ -27,7 +29,7 @@ and webhooks, not an OS notification hook. Watch the whole loop live at the host
 **[https://paa.shibubu.ai](https://paa.shibubu.ai)** — signup is open and everything is $0
 during the alpha.
 
-> Personal Agent Account provides one persistent Agent Identity — Profile, Address,
+> All Together Now provides one persistent Agent Identity — Profile, Address,
 > Contacts, Mailbox, Delegation Policy — owned by a human, that independent runtimes
 > (Claude Code, Codex, and others) can attach to as the same Agent actor, each keeping
 > its own context/memory/KV, without re-implementing identity or messaging per runtime.
@@ -37,8 +39,8 @@ during the alpha.
 1. **Get an address.** Sign up at [paa.shibubu.ai](https://paa.shibubu.ai) and you have
    `@you` and `you@paa.shibubu.ai`. Send yourself a mail from your phone: it lands in the
    timeline within a minute, sealed on arrival — the operator can't read it.
-2. **Attach a runtime — then a second one.** `paa login` connects a machine and starts the
-   background broker; `paa pair claude` (or `codex` / `gemini`) attaches the runtime as `@you`.
+2. **Attach a runtime — then a second one.** `atn login` connects a machine and starts the
+   background broker; `atn pair claude` (or `codex` / `gemini`) attaches the runtime as `@you`.
    Attach a second one and it sees the same inbox, contacts, and permissions.
 3. **Add a source.** Point GitHub's webhook at your address (issues, PR reviews, failed CI),
    `curl` from any script or Zapier, forward the notification mail that Slack / X already send
@@ -74,25 +76,25 @@ Claims are cheap; this is what has tests or a live round-trip behind it:
 
 No JavaScript runtime, no Rust toolchain, no repo clone required — the CLI and the background
 broker it installs are both prebuilt binaries from this repo's
-[Releases](https://github.com/personal-agent-account/paa/releases). Everything `paa` fetches
+[Releases](https://github.com/personal-agent-account/paa/releases). Everything `atn` fetches
 afterwards (the broker, the MCP server) is checked against the Release's `SHA256SUMS` before it
 is placed or run:
 
 ```bash
 # macOS (Apple Silicon) → darwin-arm64 · macOS (Intel) → darwin-x64 · Linux (x64) → linux-x64
 TARGET="$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/')"
-curl -fsSL "https://github.com/personal-agent-account/paa/releases/latest/download/paa-$TARGET" -o paa
-chmod +x paa
+curl -fsSL "https://github.com/personal-agent-account/paa/releases/latest/download/atn-$TARGET" -o atn
+chmod +x atn
 
 # connect this machine to your account (fetches the broker binary, verifies its checksum, starts it;
 # on macOS it registers a launchd agent so it survives reboots)
-./paa login --url https://paa-cloud.onrender.com
-./paa pair claude      # attach Claude Code (same flow for codex / gemini)
-./paa status           # who's attached, what's unread — never the message bodies
+./atn login --url https://paa-cloud.onrender.com
+./atn pair claude      # attach Claude Code (same flow for codex / gemini)
+./atn status           # who's attached, what's unread — never the message bodies
 ```
 
 Already inside Claude Code or Codex? Install the adapter as a runtime plugin instead —
-pairing (`paa login` / `paa pair` above) is still required afterward:
+pairing (`atn login` / `atn pair` above) is still required afterward:
 
 ```bash
 # Claude Code:
@@ -103,7 +105,7 @@ codex plugin marketplace add personal-agent-account/paa
 
 **Windows / iPhone / Android:** the inbox, the sources, and the "handle this" loop work from
 the PWA at [paa.shibubu.ai](https://paa.shibubu.ai) on any OS. What needs macOS or Linux today
-is the machine you *attach a runtime on* — the `paa` CLI and the broker aren't built for
+is the machine you *attach a runtime on* — the `atn` CLI and the broker aren't built for
 Windows yet. Android additionally gets an optional notification collector
 (`apps/android-collector`, build from source). iOS has no public API for that, which is why
 nothing here promises it.
@@ -111,8 +113,8 @@ nothing here promises it.
 ### Getting an account
 
 Signup is open — create an account at **[https://paa.shibubu.ai](https://paa.shibubu.ai)**,
-then run `paa login --url https://paa-cloud.onrender.com` as above (`--url` points at whichever
-PAA server issued your account).
+then run `atn login --url https://paa-cloud.onrender.com` as above (`--url` points at whichever
+All Together Now server issued your account).
 
 What the operator can and cannot read is written down, not implied:
 **[https://paa.shibubu.ai/privacy](https://paa.shibubu.ai/privacy)**. The short version: for a
@@ -132,12 +134,12 @@ lives in your browser / device and is never sent anywhere.
 Every source is created and revoked in *Settings › Sources*; each has its own token, and each
 recipe card shows the exact command for that source.
 
-## `paa-mask` — the masking half, on its own
+## `atn-mask` — the masking half, on its own
 
 If you only want the "sealed across vendors" part, `packages/mcp-mask` needs no account. Wrap
-any MCP server's command with `paa-mask --` in `.mcp.json` / `.codex/config.toml` /
+any MCP server's command with `atn-mask --` in `.mcp.json` / `.codex/config.toml` /
 `.gemini/settings.json`, put the strings you never want a model to see in
-`~/.paa/secrets.json` (`chmod 600`), and every tool result is masked before it reaches the
+`~/.atn/secrets.json` (`chmod 600`), and every tool result is masked before it reaches the
 model — the same way in every client. Emails, phone numbers, card numbers (Luhn-checked), and
 key-shaped strings are masked with no dictionary at all. See
 [`packages/mcp-mask/README.md`](packages/mcp-mask/README.md). (Not yet on npm; until then run
@@ -147,17 +149,17 @@ it from a clone: `bun packages/mcp-mask/src/cli.ts -- <your-mcp-server-command>`
 
 | Command | What it does |
 |---|---|
-| `paa login [--url …]` | Connect this machine to your account and start the broker (launchd on macOS) |
-| `paa pair <runtime>` / `paa install <runtime>` | Attach a runtime as `@you`; `install` also registers the MCP server in the runtime's config |
-| `paa uninstall <runtime>` | Remove the MCP registration and the local credential |
-| `paa status` / `paa doctor [runtime]` / `paa runtimes` | Who's attached, what's unread (counts only), what's wrong |
-| `paa broker install \| uninstall \| status` | Manage the background broker's launchd registration |
-| `paa extensions` / `paa sync [runtime]` | Extension Sync — the same skills/tools materialized in every attached runtime |
-| `paa statusline` | One line for your shell / runtime status bar |
-| `paa agent <openai\|anthropic\|gemini> --thread <id>` | Run an API-key model as a runtime for one turn and hand the draft reply to a thread |
+| `atn login [--url …]` | Connect this machine to your account and start the broker (launchd on macOS) |
+| `atn pair <runtime>` / `atn install <runtime>` | Attach a runtime as `@you`; `install` also registers the MCP server in the runtime's config |
+| `atn uninstall <runtime>` | Remove the MCP registration and the local credential |
+| `atn status` / `atn doctor [runtime]` / `atn runtimes` | Who's attached, what's unread (counts only), what's wrong |
+| `atn broker install \| uninstall \| status` | Manage the background broker's launchd registration |
+| `atn extensions` / `atn sync [runtime]` | Extension Sync — the same skills/tools materialized in every attached runtime |
+| `atn statusline` | One line for your shell / runtime status bar |
+| `atn agent <openai\|anthropic\|gemini> --thread <id>` | Run an API-key model as a runtime for one turn and hand the draft reply to a thread |
 
-Everything the CLI stores lives under `~/.paa/` (credentials, the broker binary, logs;
-`PAA_HOME` overrides it). `paa uninstall <runtime>` and `paa broker uninstall` remove what
+Everything the CLI stores lives under `~/.atn/` (credentials, the broker binary, logs;
+`PAA_HOME` overrides it). `atn uninstall <runtime>` and `atn broker uninstall` remove what
 `pair` and `login` added.
 
 ## What's in this repository
@@ -179,12 +181,12 @@ adapters/official/
   api/                 generic API-key provider adapter (OpenAI / Anthropic / Gemini)
 
 apps/
-  cli/                 `paa` command: login, pair, sync extensions, diagnostics
+  cli/                 `atn` command: login, pair, sync extensions, diagnostics
   android-collector/   Android notification collector (Kotlin) — encrypts on the device
 
 broker/                Rust device broker: wakes the paired runtime when a message arrives,
                         runs the dedicated session in a contained sandbox
-                        (background service `paa login` installs — see Quickstart)
+                        (background service `atn login` installs — see Quickstart)
 
 specs/
   runtime-adapter-contract.md   the boundary a new runtime integration implements
@@ -192,7 +194,7 @@ specs/
 
 scripts/build-binaries.sh      how the Release binaries are built (bun build --compile)
 .claude-plugin/ · .agents/     marketplace manifests for the Claude Code and Codex plugins
-.github/workflows/release.yml  tag → prebuilt `paa`, `paa-mcp`, and `paa-broker` binaries + SHA256SUMS
+.github/workflows/release.yml  tag → prebuilt `atn`, `atn-mcp`, and `atn-broker` binaries + SHA256SUMS
 ```
 
 ## What is *not* in this repository
@@ -205,18 +207,18 @@ Network implementation is kept private:
 - Device/runtime coordination backend, email gateway, push infrastructure
 - Abuse/spam systems, operational/admin infrastructure
 
-Using the code in this repo (adapters, CLI, MCP server, broker) requires a PAA Account server
+Using the code in this repo (adapters, CLI, MCP server, broker) requires an All Together Now account server
 to talk to — during Stage 1A that's the hosted instance at
 **[https://paa.shibubu.ai](https://paa.shibubu.ai)**, open to signup.
 
 ## Why this split
 
-PAA's value proposition is runtime neutrality — client/runtime code, the crypto boundary,
+The value proposition is runtime neutrality — client/runtime code, the crypto boundary,
 and the interoperability contracts (this repo) are open so any runtime (present or future)
 can implement `RuntimeAdapter` against a stable, inspectable contract. What leaves your
 machine, and how it is sealed before it does, is all in this repo. The Hosted Account
 Network that provides the actual global identity/mailbox service is a separate operational
-concern (abuse prevention, availability, recovery) that isn't part of what makes PAA
+concern (abuse prevention, availability, recovery) that isn't part of what makes the account
 runtime-neutral, so it stays private for now.
 
 ## Contributing and security

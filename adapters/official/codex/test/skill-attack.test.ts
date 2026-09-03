@@ -58,13 +58,13 @@ describe("PBI-0091 攻撃 — skill materialize の path safety(codex 経由)", 
         },
         env: {},
       }),
-    ).rejects.toThrow(/予約ファイル/);
+    ).rejects.toThrow(/reserved file/);
     expect(await readFile(skillMd, "utf8")).toBe(before);
   });
 
   test("攻撃3: files キーの references/../SKILL.md も safeJoin 後の判定に落ちる", async () => {
     const { home } = await makeCtx();
-    await expect(install("foo", { "references/../SKILL.md": "x" })).rejects.toThrow(/予約ファイル/);
+    await expect(install("foo", { "references/../SKILL.md": "x" })).rejects.toThrow(/reserved file/);
     expect(await readdir(join(home, ".codex", "skills")).catch(() => [])).toEqual([]);
   });
 

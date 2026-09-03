@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateDeviceKeyPair, seal } from "@paa/crypto-envelope";
 
-// `paa agent <provider>`(PBI-0057 / EP-0009 B)。実 provider には到達させない ——
+// `atn agent <provider>`(PBI-0057 / EP-0009 B)。実 provider には到達させない ——
 // OpenAI 互換の fake server と stub Account API を立て、CLI が何を送ったかを観測する。
 
 const CLI = join(import.meta.dir, "../src/paa.ts");
@@ -71,10 +71,10 @@ afterAll(() => {
 
 async function makeHome(withCredential = true): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "paa-agent-"));
-  await mkdir(join(home, ".paa"), { recursive: true });
+  await mkdir(join(home, ".atn"), { recursive: true });
   if (withCredential) {
     await writeFile(
-      join(home, ".paa", "credentials.json"),
+      join(home, ".atn", "credentials.json"),
       JSON.stringify({
         version: 1,
         runtimes: {
@@ -96,7 +96,7 @@ async function runCli(home: string, extra: string[] = [], provider: string = "op
     env: {
       ...process.env,
       HOME: home,
-      PAA_HOME: join(home, ".paa"),
+      PAA_HOME: join(home, ".atn"),
       PAA_AGENT_BASE_URL: PROVIDER_URL,
       PAA_NO_BROWSER: "1",
     },
@@ -125,7 +125,7 @@ beforeEach(() => {
   };
 });
 
-describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
+describe("atn agent(PBI-0057 AC-1〜AC-5)", () => {
   test("AC-1: 1 turn で provider を 1 回だけ呼び、reply を 1 回送って sent で終わる", async () => {
     const res = await runCli(await makeHome());
     expect(res.code).toBe(0);
@@ -136,7 +136,7 @@ describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
     const replies = accountCalls.filter((c) => c.path.endsWith("/reply"));
     expect(replies.length).toBe(1);
     expect(replies[0]!.body.text).toBe("こちらが下書きです");
-    expect(res.out).toContain("送信しました");
+    expect(res.out).toContain("Sent");
   });
 
   test("AC-2: reply が ask_approval_required なら approval_id を出して exit 0", async () => {
@@ -152,7 +152,7 @@ describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
     // この端末の device key を作り、その key 宛に seal した message を stub に返させる
     const kp = await generateDeviceKeyPair();
     await writeFile(
-      join(home, ".paa", "device-keys.json"),
+      join(home, ".atn", "device-keys.json"),
       JSON.stringify({
         version: 1,
         devices: {
@@ -191,7 +191,7 @@ describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
     ];
     const res = await runCli(await makeHome(), ["--wait", "10"]);
     expect(res.code).toBe(0);
-    expect(res.out).toContain("承認を待っています");
+    expect(res.out).toContain("Waiting for approval");
     expect(providerCalls.length).toBe(1);
   });
 
@@ -202,13 +202,13 @@ describe("paa agent(PBI-0057 AC-1〜AC-5)", () => {
   });
 });
 
-describe("paa agent の例外(PBI-0057 AC-X1〜X3)", () => {
+describe("atn agent の例外(PBI-0057 AC-X1〜X3)", () => {
   test("AC-X1: credential が無ければ Account も provider も 1 度も叩かずに exit 1", async () => {
     const res = await runCli(await makeHome(false));
     expect(res.code).toBe(1);
     expect(providerCalls.length).toBe(0);
     expect(accountCalls.length).toBe(0);
-    expect(res.err).toContain("未接続");
+    expect(res.err).toContain("not connected");
   });
 
   test("AC-X2: resolve 403 / provider 500 / 空応答 は exit 1 で、出力に API key が出ず reply も送らない", async () => {
@@ -240,20 +240,20 @@ describe("paa agent の例外(PBI-0057 AC-X1〜X3)", () => {
     const [a, b] = await Promise.all([runCli(home), runCli(home)]);
     expect([0, 1]).toContain(a.code);
     expect([0, 1]).toContain(b.code);
-    const raw = await readFile(join(home, ".paa", "device-keys.json"), "utf8").catch(() => "{}");
+    const raw = await readFile(join(home, ".atn", "device-keys.json"), "utf8").catch(() => "{}");
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 });
 
 // レビュー(有界)の攻撃 test — 実装コードには触らない。X1/X2/X3 の行を破りに行く
-describe("paa agent への攻撃 (PBI-0057 review)", () => {
+describe("atn agent への攻撃 (PBI-0057 review)", () => {
   test("X1 攻撃: 別 provider の credential には乗り替えられない(agent gemini に openai-api の接続を使わせない)", async () => {
     // credentials.json に openai-api だけ → gemini 呼び出しは未接続で即 exit 1。
     // Account API も provider も 1 回も叩かせない
     const home = await makeHome(); // openai-api のみ
     const res = await runCli(home, [], "gemini");
     expect(res.code).toBe(1);
-    expect(res.err).toContain("未接続");
+    expect(res.err).toContain("not connected");
     expect(accountCalls.length).toBe(0);
     expect(providerCalls.length).toBe(0);
   });
@@ -262,14 +262,14 @@ describe("paa agent への攻撃 (PBI-0057 review)", () => {
     // gemini-api credential を同じ stub に足す。stub の resolve は常に OPENAI_TOKEN を返す
     // (= server 側が取り違えた体)。CLI は GEMINI_TOKEN を探すので鍵の取り違えでは provider を呼ばない
     const home = await makeHome();
-    const cred = JSON.parse(await readFile(join(home, ".paa", "credentials.json"), "utf8"));
+    const cred = JSON.parse(await readFile(join(home, ".atn", "credentials.json"), "utf8"));
     cred.runtimes["gemini-api"] = {
       runtime_id: "rt_gemini_atk",
       token: TOKEN,
       base_url: ACCOUNT_URL,
       name: "Gemini (API)",
     };
-    await writeFile(join(home, ".paa", "credentials.json"), JSON.stringify(cred));
+    await writeFile(join(home, ".atn", "credentials.json"), JSON.stringify(cred));
     const res = await runCli(home, [], "gemini");
     expect(res.code).toBe(1);
     expect(res.err).toContain("connection_resolve_empty");
@@ -303,7 +303,7 @@ describe("paa agent への攻撃 (PBI-0057 review)", () => {
     const [a, b] = await Promise.all([runCli(home), runCli(home)]);
     expect(a.code).toBe(0);
     expect(b.code).toBe(0);
-    const raw = await readFile(join(home, ".paa", "device-keys.json"), "utf8");
+    const raw = await readFile(join(home, ".atn", "device-keys.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(Object.keys(parsed.devices)).toEqual(["openai-api"]);
     expect(parsed.devices["openai-api"].keyId).toBeString();

@@ -18,8 +18,8 @@ async function cliExists(cmd: string): Promise<boolean> {
 async function isolated(extra: Record<string, string> = {}): Promise<AdapterContext> {
   const home = await mkdtemp(join(tmpdir(), "paa-home-"));
   // PAA_HOME も隔離する: binary が在れば register はそれを使う(PBI-0132)ので、
-  // dev 機の ~/.paa/bin/paa-mcp の有無で結果が変わらないようにする
-  return { env: { ...process.env, HOME: home, PAA_HOME: join(home, ".paa"), ...extra } };
+  // dev 機の ~/.atn/bin/atn-mcp の有無で結果が変わらないようにする
+  return { env: { ...process.env, HOME: home, PAA_HOME: join(home, ".atn"), ...extra } };
 }
 
 /** ユーザー本物の設定が触られていないことを確かめる */
@@ -34,7 +34,7 @@ const registerInput = (adapter: RuntimeAdapter) => ({
   serverEntry: MCP_SERVER_ENTRY,
   runtimeKind: adapter.id,
   baseUrl: "http://localhost:8787",
-  serverName: "paa",
+  serverName: "atn",
 });
 
 describe.skipIf(!(await cliExists("claude")))("claude adapter", () => {
@@ -48,25 +48,25 @@ describe.skipIf(!(await cliExists("claude")))("claude adapter", () => {
       expect((await claudeAdapter.detect(ctx)).installed).toBe(true);
 
       await claudeAdapter.register(ctx, registerInput(claudeAdapter));
-      const server = (await readServers()).paa;
+      const server = (await readServers()).atn;
       expect(server.command).toBe("bun"); // binary の無い環境では従来経路(PBI-0132 AC-3)
       expect(server.args).toEqual([MCP_SERVER_ENTRY]);
       expect(server.env.PAA_RUNTIME_KIND).toBe("claude");
-      expect((await claudeAdapter.doctor(ctx, "paa"))[0]?.ok).toBe(true);
+      expect((await claudeAdapter.doctor(ctx, "atn"))[0]?.ok).toBe(true);
 
       // 再 install(upgrade)でも重複しない
       await claudeAdapter.register(ctx, registerInput(claudeAdapter));
-      expect(Object.keys(await readServers())).toEqual(["paa"]);
+      expect(Object.keys(await readServers())).toEqual(["atn"]);
 
-      await claudeAdapter.unregister(ctx, "paa");
-      expect((await readServers()).paa).toBeUndefined();
-      expect((await claudeAdapter.doctor(ctx, "paa"))[0]?.ok).toBe(false);
+      await claudeAdapter.unregister(ctx, "atn");
+      expect((await readServers()).atn).toBeUndefined();
+      expect((await claudeAdapter.doctor(ctx, "atn"))[0]?.ok).toBe(false);
     });
   }, 60_000);
 });
 
 describe.skipIf(!(await cliExists("codex")))("codex adapter", () => {
-  test("install で [mcp_servers.paa] を書き、uninstall で消す(実 config は触らない)", async () => {
+  test("install で [mcp_servers.atn] を書き、uninstall で消す(実 config は触らない)", async () => {
     const codexHome = await mkdtemp(join(tmpdir(), "paa-codex-"));
     await writeFile(join(codexHome, "config.toml"), "");
     const ctx = await isolated({ CODEX_HOME: codexHome });
@@ -77,17 +77,17 @@ describe.skipIf(!(await cliExists("codex")))("codex adapter", () => {
 
       await codexAdapter.register(ctx, registerInput(codexAdapter));
       const toml = await readFile(configPath, "utf8");
-      expect(toml).toContain("[mcp_servers.paa]");
+      expect(toml).toContain("[mcp_servers.atn]");
       expect(toml).toContain(MCP_SERVER_ENTRY);
       expect(toml).toContain('PAA_RUNTIME_KIND = "codex"');
-      expect((await codexAdapter.doctor(ctx, "paa"))[0]?.ok).toBe(true);
+      expect((await codexAdapter.doctor(ctx, "atn"))[0]?.ok).toBe(true);
 
       await codexAdapter.register(ctx, registerInput(codexAdapter));
-      expect((await readFile(configPath, "utf8")).match(/\[mcp_servers\.paa\]/g)?.length).toBe(1);
+      expect((await readFile(configPath, "utf8")).match(/\[mcp_servers\.atn\]/g)?.length).toBe(1);
 
-      await codexAdapter.unregister(ctx, "paa");
-      expect(await readFile(configPath, "utf8")).not.toContain("[mcp_servers.paa]");
-      expect((await codexAdapter.doctor(ctx, "paa"))[0]?.ok).toBe(false);
+      await codexAdapter.unregister(ctx, "atn");
+      expect(await readFile(configPath, "utf8")).not.toContain("[mcp_servers.atn]");
+      expect((await codexAdapter.doctor(ctx, "atn"))[0]?.ok).toBe(false);
     });
   }, 60_000);
 });

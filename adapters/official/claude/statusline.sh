@@ -2,16 +2,16 @@
 # paa の未読を Claude Code の statusline に出す(PBI-0130)。
 #
 # settings.json の statusLine から呼ぶ。render のたびに走るので、ここでは **HTTP を待たない**:
-#   1. cache(~/.paa/statusline)が在れば、その中身をそのまま出す(cat 1 回。bun を起動しない)
-#   2. 最終試行から TTL 秒たっていたら、`paa statusline --refresh` を背景に投げて即戻る
-#      (次の render で新しい値が出る。起動口は binary(~/.paa/bin/paa)→ bun の順 — PBI-0132)
+#   1. cache(~/.atn/statusline)が在れば、その中身をそのまま出す(cat 1 回。bun を起動しない)
+#   2. 最終試行から TTL 秒たっていたら、`atn statusline --refresh` を背景に投げて即戻る
+#      (次の render で新しい値が出る。起動口は binary(~/.atn/bin/paa)→ bun の順 — PBI-0132)
 # 何が欠けていても **何も出さずに exit 0**。statusline に error 文字列を出さない・入力を止めない。
 #
 # 表示は件数だけ(組み立ては packages/adapter/src/brief.ts の formatStatusline が正本 ——
 # この script は文字列を組まない)。
 set -u
 
-PAA_DIR="${PAA_HOME:-$HOME/.paa}"
+PAA_DIR="${PAA_HOME:-$HOME/.atn}"
 CACHE="$PAA_DIR/statusline"
 # 最終「試行」時刻。cache 本体と分けるのは、server 断で cache を更新しない時でも
 # 再試行の間隔を守るため(毎 render で bun を起こさない)

@@ -45,7 +45,7 @@ async fn attacker_written_body_cannot_run_shell_in_any_runtime() {
         "PAA_ATTACK_RUNTIMES に起こす runtime を挙げること(例: PAA_ATTACK_RUNTIMES=claude,gemini)"
     );
 
-    let home = std::env::temp_dir().join(format!("paa-broker-0167-{}", std::process::id()));
+    let home = std::env::temp_dir().join(format!("atn-broker-0167-{}", std::process::id()));
     let _ = fs::remove_dir_all(&home);
     let reg = registry::builtin();
     let env = launch::containment_env();

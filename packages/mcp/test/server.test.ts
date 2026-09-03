@@ -30,7 +30,7 @@ afterAll(() => stub.stop(true));
 
 describe("MCP server の credential 解決", () => {
   test("credential store から token を解決して tool が動く(PAA_TOKEN 不要)", async () => {
-    const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "paa-mcp-")) };
+    const env = { PAA_HOME: await mkdtemp(join(tmpdir(), "atn-mcp-")) };
     await saveCredential(
       "claude",
       {
@@ -60,7 +60,7 @@ describe("MCP server の credential 解決", () => {
     const proc = Bun.spawn(["bun", SERVER], {
       env: {
         PATH: process.env.PATH ?? "",
-        PAA_HOME: await mkdtemp(join(tmpdir(), "paa-mcp-empty-")),
+        PAA_HOME: await mkdtemp(join(tmpdir(), "atn-mcp-empty-")),
         PAA_RUNTIME_KIND: "claude",
       },
       stdout: "pipe",
@@ -68,7 +68,7 @@ describe("MCP server の credential 解決", () => {
     });
     const stderr = await new Response(proc.stderr).text();
     expect(await proc.exited).toBe(1);
-    expect(stderr).toContain("credential が見つかりません");
-    expect(stderr).toContain("bun run paa install claude");
+    expect(stderr).toContain("credential was found");
+    expect(stderr).toContain("atn install claude");
   }, 30_000);
 });

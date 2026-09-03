@@ -88,8 +88,8 @@ describe("pairing engine", () => {
     });
     expect(outcome.status).toBe("failed");
     if (outcome.status !== "failed") return;
-    expect(outcome.detail).toContain("http://127.0.0.1:9 に接続できません");
-    expect(outcome.detail).toContain("5 回連続");
+    expect(outcome.detail).toContain("cannot connect to http://127.0.0.1:9");
+    expect(outcome.detail).toContain("5 times in a row");
     // 生の fetch message(stack trace と見分けが付かない)は出さない
     expect(outcome.detail).not.toContain("Unable to connect");
     // 0.5 → 1 → 2 → 4 秒の backoff で 4 回待って 5 回撃つ
@@ -109,7 +109,7 @@ describe("pairing engine", () => {
         sleep: async () => {},
         env,
       });
-      expect(outcome).toEqual({ status: "failed", detail: 'pair/start が 400 を返しました: {"error":"invalid_kind"}' });
+      expect(outcome).toEqual({ status: "failed", detail: 'pair/start returned 400: {"error":"invalid_kind"}' });
     } finally {
       bad.stop(true);
     }

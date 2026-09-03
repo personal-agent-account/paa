@@ -5,7 +5,7 @@ import { paaHome } from "./credentials.ts";
 
 // E2EE device keypair のローカル保管(要件 §9-11、PBI-0006)。
 // `credentials.json` とは**別ファイル**にする: saveCredential は entry 丸ごと置換なので、
-// もし同居させると `paa install claude` の再実行(通常の再pairing経路)で private key が
+// もし同居させると `atn install claude` の再実行(通常の再pairing経路)で private key が
 // 黙って消え、その鍵で seal 済みの過去メッセージが恒久的に復号不能になる
 // (EP-0001 LEARN #5「credential を単一 token で持つと壊れる」と同型の事故)。
 // lock/atomic-write は credentials.ts と同じパターンをこのファイル内に個別実装する
@@ -80,7 +80,7 @@ async function withLock<T>(env: Env, fn: () => Promise<T>): Promise<T> {
         continue;
       }
       if (Date.now() > deadline) {
-        throw new Error(`device-keys store が別プロセスに使用されています: ${lockPath}`);
+        throw new Error(`The device-keys store is in use by another process: ${lockPath}`);
       }
       await new Promise((r) => setTimeout(r, 20 + Math.floor(Math.random() * 40)));
     }

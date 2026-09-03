@@ -87,7 +87,7 @@ async function reportStatus(
   });
   if (res.status < 200 || res.status >= 300) {
     throw new Error(
-      `status 報告に失敗しました(${res.status}): POST /v1/extensions/${extensionId}/status`,
+      `status report failed (${res.status}): POST /v1/extensions/${extensionId}/status`,
     );
   }
 }
@@ -110,7 +110,7 @@ async function resolveCredentialRef(
   if (envMatch) {
     const name = envMatch[1]!;
     const value = env[name];
-    if (!value) return { ok: false, detail: `${ref} を解決できません` };
+    if (!value) return { ok: false, detail: `cannot resolve ${ref}` };
     return { ok: true, env: { [name]: value } };
   }
   const connMatch = /^connection:(.+)$/.exec(ref);
@@ -122,11 +122,11 @@ async function resolveCredentialRef(
       { token: options.token, method: "POST" },
     );
     if (res.status !== 200 || !res.body?.env) {
-      return { ok: false, detail: `${ref} を解決できません` };
+      return { ok: false, detail: `cannot resolve ${ref}` };
     }
     return { ok: true, env: res.body.env };
   }
-  return { ok: false, detail: `未対応の credential_ref scheme です: ${ref}` };
+  return { ok: false, detail: `unsupported credential_ref scheme: ${ref}` };
 }
 
 function asStringRecord(v: unknown): Record<string, string> {

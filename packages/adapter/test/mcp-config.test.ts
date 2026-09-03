@@ -19,9 +19,9 @@ async function installFakeCli(name: string, code = 0): Promise<void> {
   await chmod(join(bin, name), 0o755);
 }
 
-// PAA_HOME を隔離する: resolveMcpServerCommand(PBI-0132)が dev 機の ~/.paa/bin/paa-mcp を
+// PAA_HOME を隔離する: resolveMcpServerCommand(PBI-0132)が dev 機の ~/.atn/bin/atn-mcp を
 // 拾うと、この test の期待(`-- bun /repo/mcp.ts`)が機械ごとに揺れる
-const ctx = (): AdapterContext => ({ env: { PATH: bin, HOME: root, PAA_HOME: join(root, ".paa") } });
+const ctx = (): AdapterContext => ({ env: { PATH: bin, HOME: root, PAA_HOME: join(root, ".atn") } });
 
 const jsonSpec = () => ({
   id: "fakejson",
@@ -49,7 +49,7 @@ const tomlSpec = () => ({
 });
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "paa-mcpcfg-"));
+  root = await mkdtemp(join(tmpdir(), "atn-mcpcfg-"));
   bin = join(root, "bin");
   marker = join(root, "argv.log");
   configFile = join(root, "config");
@@ -72,12 +72,12 @@ describe("createMcpConfigAdapter — argv の組み立て (PBI-0060 AC-1)", () =
       serverEntry: "/repo/mcp.ts",
       runtimeKind: "fakejson",
       baseUrl: "http://localhost:8787",
-      serverName: "paa",
+      serverName: "atn",
     });
     const lines = await argvLines();
-    expect(lines[0]).toBe("mcp remove -s user paa");
+    expect(lines[0]).toBe("mcp remove -s user atn");
     expect(lines[1]).toBe(
-      "mcp add -s user paa -e PAA_RUNTIME_KIND=fakejson -e PAA_URL=http://localhost:8787 -- bun /repo/mcp.ts",
+      "mcp add -s user atn -e PAA_RUNTIME_KIND=fakejson -e PAA_URL=http://localhost:8787 -- bun /repo/mcp.ts",
     );
   });
 
@@ -85,14 +85,14 @@ describe("createMcpConfigAdapter — argv の組み立て (PBI-0060 AC-1)", () =
     await installFakeCli("fakejson", 3);
     const a = createMcpConfigAdapter(jsonSpec());
     await expect(
-      a.register(ctx(), { serverEntry: "/x", runtimeKind: "k", baseUrl: "http://h", serverName: "paa" }),
+      a.register(ctx(), { serverEntry: "/x", runtimeKind: "k", baseUrl: "http://h", serverName: "atn" }),
     ).rejects.toThrow(/fakejson mcp add failed/);
   });
 
   test("unregister は remove の失敗をそのまま Error にする", async () => {
     await installFakeCli("fakejson", 1);
     const a = createMcpConfigAdapter(jsonSpec());
-    await expect(a.unregister(ctx(), "paa")).rejects.toThrow(/fakejson mcp remove failed/);
+    await expect(a.unregister(ctx(), "atn")).rejects.toThrow(/fakejson mcp remove failed/);
   });
 
   test("detect は CLI の有無を返す(見つからなければ installHint)", async () => {
@@ -114,11 +114,11 @@ describe("createMcpConfigAdapter — config の読み (PBI-0060 AC-2 / AC-3)", (
     const a = createMcpConfigAdapter(jsonSpec());
     expect((await a.listExtensions(ctx())).map((e) => e.name).sort()).toEqual(["other", "paa"]);
     const [ok] = await a.doctor(ctx(), "paa");
-    expect(ok).toMatchObject({ ok: true, label: "Fake JSON CLI の MCP 登録" });
+    expect(ok).toMatchObject({ ok: true, label: "Fake JSON CLI MCP registration" });
     expect(ok!.detail).toContain(configFile);
     const [ng] = await a.doctor(ctx(), "missing");
     expect(ng!.ok).toBe(false);
-    expect(ng!.detail).toContain("bun run paa install fakejson");
+    expect(ng!.detail).toContain("atn install fakejson");
   });
 
   test("AC-3: TOML config でも同じ結果(形式の違いが呼び出し側に漏れない)", async () => {
@@ -182,7 +182,7 @@ describe("createMcpConfigAdapter — applyExtension (PBI-0060 AC-5)", () => {
     const a = createMcpConfigAdapter(jsonSpec());
     await expect(
       a.applyExtension(ctx(), { action: "install", name: "bad", kind: "mcp", spec: {}, env: {} }),
-    ).rejects.toThrow(/spec.command が文字列ではありません/);
+    ).rejects.toThrow(/spec\.command is not a string/);
     expect(await argvLines()).toEqual([]);
   });
 });

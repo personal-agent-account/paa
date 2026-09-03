@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { apiAdapters, apiProviderAdapter } from "../src/index.ts";
 
 // PBI-0070 / EP-0009 C: API provider の adapter は **native の設定を 1 つも書かない**。
-// register/unregister が何かを書き始めたら、この runtime の設計(実体は paa agent)が壊れている。
+// register/unregister が何かを書き始めたら、この runtime の設計(実体は atn agent)が壊れている。
 
 async function countFiles(dir: string): Promise<number> {
   const entries = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
@@ -37,9 +37,9 @@ describe("API provider adapter (PBI-0070 AC-5)", () => {
       serverEntry: "/x/mcp-server.ts",
       runtimeKind: "openai-api",
       baseUrl: "http://localhost:8787",
-      serverName: "paa",
+      serverName: "atn",
     });
-    await adapter.unregister(ctx, "paa");
+    await adapter.unregister(ctx, "atn");
     expect(await countFiles(home)).toBe(before);
     expect(await adapter.listExtensions(ctx)).toEqual([]);
     expect(adapter.extensionKinds).toEqual([]);
@@ -48,12 +48,12 @@ describe("API provider adapter (PBI-0070 AC-5)", () => {
   test("doctor は credential の有無を返す(未接続 → ok:false)", async () => {
     const home = await mkdtemp(join(tmpdir(), "paa-api-doctor-"));
     const adapter = apiProviderAdapter("openai", "OpenAI (API)");
-    const missing = await adapter.doctor({ env: { HOME: home, PAA_HOME: join(home, ".paa") } }, "paa");
+    const missing = await adapter.doctor({ env: { HOME: home, PAA_HOME: join(home, ".atn") } }, "paa");
     expect(missing[0]!.ok).toBe(false);
 
-    await mkdir(join(home, ".paa"), { recursive: true });
+    await mkdir(join(home, ".atn"), { recursive: true });
     await writeFile(
-      join(home, ".paa", "credentials.json"),
+      join(home, ".atn", "credentials.json"),
       JSON.stringify({
         version: 1,
         runtimes: {
@@ -61,7 +61,7 @@ describe("API provider adapter (PBI-0070 AC-5)", () => {
         },
       }),
     );
-    const found = await adapter.doctor({ env: { HOME: home, PAA_HOME: join(home, ".paa") } }, "paa");
+    const found = await adapter.doctor({ env: { HOME: home, PAA_HOME: join(home, ".atn") } }, "paa");
     expect(found[0]!.ok).toBe(true);
   });
 });

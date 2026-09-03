@@ -151,7 +151,7 @@ describe("claudeAdapter.applyExtension — kind=skill(PBI-0008)", () => {
         spec: { description: "D", instructions: "x" },
         env: {},
       }),
-    ).rejects.toThrow(/不正なパス/);
+    ).rejects.toThrow(/invalid path/);
     expect(await listDir(parent)).toEqual(before);
   });
 
@@ -169,7 +169,7 @@ describe("claudeAdapter.applyExtension — kind=skill(PBI-0008)", () => {
         },
         env: {},
       }),
-    ).rejects.toThrow(/不正なパス/);
+    ).rejects.toThrow(/invalid path/);
     expect(await stat(join(home, ".claude", "skills", "foo")).catch(() => null)).toBeNull();
     // "../outside.txt" は skillDir(skills/foo)基準の相対パスなので、書けてしまうとすれば
     // skills/outside.txt(= skills/foo/ の外、skills/ 自体の中)に着地する
@@ -226,7 +226,7 @@ describe("claudeAdapter.applyExtension — kind=skill(PBI-0008)", () => {
           spec: { description: "D", instructions: "x" },
           env: {},
         }),
-      ).rejects.toThrow(/不正なパス/);
+      ).rejects.toThrow(/invalid path/);
       expect(await readFile(join(otherDir, "OTHER.md"), "utf8")).toBe("keep-me");
     }
   });
@@ -291,7 +291,7 @@ describe("claudeAdapter.applyExtension — kind=skill(PBI-0008)", () => {
         spec: { description: "D", instructions: "x" },
         env: {},
       }),
-    ).rejects.toThrow(/PAA が作成していない/);
+    ).rejects.toThrow(/did not create/);
     expect(await readFile(join(humanDir, "SKILL.md"), "utf8")).toBe("human's own skill");
     expect(await listDir(humanDir)).toEqual(["SKILL.md"]);
   });
@@ -334,7 +334,7 @@ describe("claudeAdapter.applyExtension — kind=skill(PBI-0008)", () => {
           spec: { description: "D", instructions: "本文" },
           env: {},
         }),
-      ).rejects.toThrow(/パス区切り/);
+      ).rejects.toThrow(/path separator/);
       // 中間ディレクトリ(skills/foo)も作られない — 作られると marker を持たないため
       // 後から正当な skill "foo" が AC-15 の分岐で永久に install 不能になる
       expect(await listDir(skills)).toEqual(before);

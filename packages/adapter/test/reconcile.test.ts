@@ -141,9 +141,9 @@ describe("reconcile()", () => {
       env: {}, // GITHUB_TOKEN が無い
     });
     expect(state.applyCalls).toEqual([]); // native を書かない
-    expect(result.failed).toMatchObject([{ name: "github", detail: "env:GITHUB_TOKEN を解決できません" }]);
+    expect(result.failed).toMatchObject([{ name: "github", detail: "cannot resolve env:GITHUB_TOKEN" }]);
     expect(statusCalls).toMatchObject([
-      { extensionId: "ext_gh", body: { status: "failed", detail: "env:GITHUB_TOKEN を解決できません" } },
+      { extensionId: "ext_gh", body: { status: "failed", detail: "cannot resolve env:GITHUB_TOKEN" } },
     ]);
   });
 
@@ -234,9 +234,9 @@ describe("reconcile()", () => {
       env: {},
     });
     expect(state.applyCalls).toEqual([]); // native を書かない
-    expect(result.failed).toMatchObject([{ name: "github", detail: "connection:github を解決できません" }]);
+    expect(result.failed).toMatchObject([{ name: "github", detail: "cannot resolve connection:github" }]);
     expect(statusCalls).toMatchObject([
-      { extensionId: "ext_gh", body: { status: "failed", detail: "connection:github を解決できません" } },
+      { extensionId: "ext_gh", body: { status: "failed", detail: "cannot resolve connection:github" } },
     ]);
     // applied_revision は送らない(reportStatus の既定 null。再 authorize 後の revision 比較を壊さないため)
     expect(statusCalls[0]!.body.applied_revision).toBeNull();

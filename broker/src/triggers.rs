@@ -48,7 +48,7 @@ pub const MAX_HOOK_DIRS: usize = 8;
 const HOOK_LINE_MAX: usize = 4096;
 const HOOK_CMD_MAX: usize = 64;
 const HOOK_PATH_MAX: usize = 1024;
-/// socket file 名。置き場は `broker_home()`(`PAA_BROKER_HOME` を尊重する) —— `~/.paa/broker.sock` を
+/// socket file 名。置き場は `broker_home()`(`PAA_BROKER_HOME` を尊重する) —— `~/.atn/broker.sock` を
 /// hard-code すると test / E2E がユーザー本物の socket を掴む(PBI-0034 と同じ罠)。
 pub const HOOK_SOCKET_NAME: &str = "broker.sock";
 
@@ -94,13 +94,13 @@ pub fn spawn_fs_watch(dirs: &[PathBuf], tx: UnboundedSender<Trigger>) -> Option<
             let _ = tx.send(Trigger::Fs);
         }
     })
-    .map_err(|e| eprintln!("broker: fs watch を作れません({e})。heartbeat のみで再スキャンします"))
+    .map_err(|e| eprintln!("broker: cannot create the fs watch ({e}). Rescanning on heartbeat only"))
     .ok()?;
     let mut armed = 0usize;
     for dir in dirs {
         match watcher.watch(dir, RecursiveMode::NonRecursive) {
             Ok(()) => armed += 1,
-            Err(e) => eprintln!("broker: fs watch 失敗 dir={} ({e})", dir.display()),
+            Err(e) => eprintln!("broker: fs watch failed dir={} ({e})", dir.display()),
         }
     }
     if armed == 0 {
@@ -160,7 +160,7 @@ pub fn heartbeat_action(idle: Duration, idle_timeout: Duration, woke: bool) -> T
         return TickAction::Reconnect("wake from sleep");
     }
     if idle > idle_timeout {
-        return TickAction::Reconnect("idle timeout(応答なし。half-open connection とみなす)");
+        return TickAction::Reconnect("idle timeout (no response; treating the connection as half-open)");
     }
     TickAction::Rescan
 }
@@ -274,7 +274,7 @@ pub fn absorb(registry: &Registry, hook_dirs: &mut Vec<PathBuf>, batch: &[Trigge
                 if let Some(dir) = hook_dir(path)
                     && push_hook_dir(hook_dirs, dir.clone())
                 {
-                    eprintln!("broker: hook dir 追加 {}", dir.display());
+                    eprintln!("broker: hook dir added {}", dir.display());
                     new_dir = true;
                 }
             }
@@ -300,7 +300,7 @@ pub async fn serve_hook_socket(sock: PathBuf, tx: UnboundedSender<Trigger>) {
     let listener = match UnixListener::bind(&sock) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("broker: hook socket を bind できません path={} ({e})", sock.display());
+            eprintln!("broker: cannot bind the hook socket path={} ({e})", sock.display());
             return;
         }
     };
@@ -343,7 +343,7 @@ fn set_mode(p: &Path, mode: u32) {
 #[cfg(not(unix))]
 fn set_mode(_p: &Path, _mode: u32) {}
 
-/// zsh 用の shell hook(要件 §45.3 層 4)。`paa-broker --print-shell-hook` が stdout に出す。
+/// zsh 用の shell hook(要件 §45.3 層 4)。`atn-broker --print-shell-hook` が stdout に出す。
 ///
 /// **broker は shell rc を書き換えない** —— 入れるかどうかは人が決める(不可逆・外向きの操作)。
 /// 送るのは **command 名と実体 path だけ**(§45.8)。引数・cwd・env・履歴本文は一切送らない。
@@ -354,30 +354,33 @@ fn set_mode(_p: &Path, _mode: u32) {}
 /// 正しく見えるのに既定の zsh では 1 バイトも送らない、という壊れ方をする —— 実測 2 件:
 /// `[A-Za-z0-9._-]##` は `EXTENDED_GLOB` が要る(既定 off、`emulate -L zsh` が更に既定へ戻す)、
 /// `$history[$HISTCMD]` は precmd 時点で「次の番号」を指し、`HISTSIZE=0` なら常に空。
-pub const SHELL_HOOK_ZSH: &str = r#"# PAA shell hook (要件 §45.3 層 4) — ~/.zshrc に貼る。
-# 送るのは「直前に実行した command 名」と「その実体 path」だけ。引数・cwd・環境変数は送らない。
+pub const SHELL_HOOK_ZSH: &str = r#"# All Together Now shell hook — paste into ~/.zshrc.
+# It sends only the name of the command you just ran and the path of its binary.
+# Arguments, cwd, and environment variables are never sent.
 #
-# command 名は preexec が受け取る command line の第 1 語から取る(履歴に依存しない) ——
-# $history[$HISTCMD] 方式は HISTSIZE=0 の環境で無言で死に、precmd 時点の HISTCMD は
-# 「次に入力される番号」なので添字も 1 ずれる。preexec は変数代入 1 回だけで I/O をしない。
-typeset -g _paa_last_cmd=""
+# The command name is taken from the first word of the command line preexec receives
+# (no dependency on history): the $history[$HISTCMD] approach dies silently with
+# HISTSIZE=0, and HISTCMD at precmd time is "the next number", so it is off by one.
+# preexec does a single variable assignment and no I/O.
+typeset -g _atn_last_cmd=""
 
-_paa_preexec() {
+_atn_preexec() {
   emulate -L zsh
-  _paa_last_cmd=${${(z)1}[1]}
+  _atn_last_cmd=${${(z)1}[1]}
 }
 
-_paa_notify() {
+_atn_notify() {
   emulate -L zsh
-  local c=$_paa_last_cmd p
-  _paa_last_cmd=""
+  local c=$_atn_last_cmd p
+  _atn_last_cmd=""
   [[ -n $c ]] || return 0
-  local sock=${PAA_BROKER_HOME:-$HOME/.paa/broker}/broker.sock
+  local sock=${PAA_BROKER_HOME:-$HOME/.atn/broker}/broker.sock
   [[ -S $sock ]] || return 0
   if [[ $c == */* ]]; then p=${c:A}; c=${c:t}; else p=${commands[$c]}; fi
   [[ -n $p && -x $p ]] || return 0
-  # 文字種は broker 側 is_cmd_byte と同じ。否定形なのは EXTENDED_GLOB(既定 off。emulate -L zsh が
-  # 更に既定へ戻す)に依存しないため —— `[A-Za-z0-9._-]##` は既定の zsh では決して一致しない。
+  # Same character set as is_cmd_byte on the broker side. Written as a negation so it does not
+  # depend on EXTENDED_GLOB (off by default; emulate -L zsh resets it) — `[A-Za-z0-9._-]##`
+  # never matches in a default zsh.
   [[ $c != *[^A-Za-z0-9._-]* ]] || return 0
   zmodload -F zsh/net/socket b:zsocket 2>/dev/null || return 0
   zsocket "$sock" 2>/dev/null || return 0
@@ -386,8 +389,8 @@ _paa_notify() {
 }
 
 typeset -ga preexec_functions precmd_functions
-preexec_functions+=(_paa_preexec)
-precmd_functions+=(_paa_notify)
+preexec_functions+=(_atn_preexec)
+precmd_functions+=(_atn_notify)
 "#;
 
 #[cfg(test)]
@@ -400,7 +403,7 @@ mod tests {
 
     fn tmp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir()
-            .join(format!("paa-broker-trig-{name}-{}", std::process::id()));
+            .join(format!("atn-broker-trig-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
