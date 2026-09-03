@@ -1,11 +1,14 @@
-# tag を打つと単体実行ファイルを作って Release に添付する(PBI-0137)。
+# tag を打つと単体実行ファイル + broker(Rust)binary を作って Release に添付する(PBI-0137・PBI-0154)。
 #
-# `paa install` と plugin の launcher はここで公開された asset を取りに来る
+# `paa install` / `paa login` と plugin の launcher はここで公開された asset を取りに来る
 # (`https://github.com/<owner>/<repo>/releases/download/v<version>/paa-mcp-<target>`)。
 # **公開 repo(personal-agent-account/paa)側で走った Release だけが token 無しで取れる** ——
 # 正本 repo(private)で走らせた場合、asset は private になり取得側は 404 になる。
-# action の版は 2026-08-31 に GitHub API で実測した最新 major:
-#   actions/checkout v7.0.1 / oven-sh/setup-bun v2.2.0 / softprops/action-gh-release v3.0.3
+# action の版は 2026-09-01 に GitHub API で実測した最新 major:
+#   actions/checkout v7.0.1 / oven-sh/setup-bun v2.2.0 / softprops/action-gh-release v3.0.3 /
+#   actions/upload-artifact v7.0.1 / actions/download-artifact v8.0.1
+# `macos-14` は 2026-07-06 から非推奨(2026-11-02 に廃止)なので broker の darwin build は
+# `macos-latest` を使う(実測: 2026-09-01 時点で macOS 26 相当)。
 name: release
 
 on:
@@ -29,11 +32,74 @@ jobs:
       - name: build binaries
         run: ./scripts/build-binaries.sh --out dist
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bun-binaries
+          path: dist/*
+          retention-days: 1
+
+  # broker(Rust)は bun compile と違って自前でクロスコンパイルしない(notify クレートが
+  # macOS backend を要る)。darwin 2 target(arm64/x64)は macOS runner 1 本で作る ——
+  # Apple 純正ツールチェーンは同一 host から両 darwin arch を linker 追加無しでビルドできる
+  # (2026-09-01 実測: このリポジトリの x64 mac で aarch64-apple-darwin への `cargo check` が
+  # 素で通った。逆向きの arm64 → x86_64-apple-darwin も同じ toolchain で成立する)
+  broker-darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup target add x86_64-apple-darwin
+
+      # PAA_REGISTRY_PUBLIC_KEY は compile-time pin(broker/src/registry.rs)。本番の署名鍵は
+      # dev と同一(shibubu-manager/secrets/REGISTRY.md 実測)なので、broker/registry.pub の
+      # 値がそのまま本番向けの正しい public key ——secret ではないのでそのまま焼く
+      - name: build broker (darwin-arm64 / darwin-x64)
+        working-directory: broker
+        run: |
+          key="$(cat registry.pub)"
+          PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release
+          PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release --target x86_64-apple-darwin
+          mkdir -p ../dist
+          cp target/release/paa-broker ../dist/paa-broker-darwin-arm64
+          cp target/x86_64-apple-darwin/release/paa-broker ../dist/paa-broker-darwin-x64
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: broker-darwin
+          path: dist/*
+          retention-days: 1
+
+  broker-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: build broker (linux-x64)
+        working-directory: broker
+        run: |
+          key="$(cat registry.pub)"
+          PAA_REGISTRY_PUBLIC_KEY="$key" cargo build --release
+          mkdir -p ../dist
+          cp target/release/paa-broker ../dist/paa-broker-linux-x64
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: broker-linux
+          path: dist/*
+          retention-days: 1
+
+  release:
+    needs: [binaries, broker-darwin, broker-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
       # 取得側(ensureBinary / launcher)は SHA256SUMS を**必ず**照合する。
       # ここで作らないと、どちらも「照合表が無い」として取得を諦める(壊れた binary は流れない)
       - name: SHA256SUMS
         working-directory: dist
-        run: sha256sum paa-mcp-* paa-darwin-* paa-linux-* > SHA256SUMS
+        run: sha256sum paa-mcp-* paa-darwin-* paa-linux-* paa-broker-* > SHA256SUMS
 
       - uses: softprops/action-gh-release@v3
         with:
@@ -44,4 +110,7 @@ jobs:
             dist/paa-darwin-arm64
             dist/paa-darwin-x64
             dist/paa-linux-x64
+            dist/paa-broker-darwin-arm64
+            dist/paa-broker-darwin-x64
+            dist/paa-broker-linux-x64
             dist/SHA256SUMS

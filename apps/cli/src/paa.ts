@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import {
   apiCall,
+  binDir,
   DEFAULT_BASE_URL,
   doctorRuntime,
+  ensureBinary,
   fetchBrief,
   formatBrief,
   formatStatusline,
@@ -187,10 +189,11 @@ const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 /**
  * broker binary の解決。`PAA_BROKER_BIN` は明示指定として fallback しない
- * (`PAA_CLI` と同じ設計)。未指定なら release → debug → PATH の `paa-broker` の順。
- * **見つからなければ null** —— 呼び出し側は spawn より前(launchd 登録より前)に build 案内で止まる。
- * launchd に登録してから binary 不在に気付くと、案内は launchd が起こす `paa broker` の log にしか
- * 出ず、`KeepAlive` が 10 秒毎に再起動し続ける(PBI-0048 レビュー AC-X2)
+ * (`PAA_CLI` と同じ設計)。未指定なら release → debug → 公開 Release からの取得先(PBI-0154) →
+ * PATH の `paa-broker` の順。**見つからなければ null** —— 呼び出し側は spawn より前
+ * (launchd 登録より前)に build 案内で止まる。launchd に登録してから binary 不在に気付くと、
+ * 案内は launchd が起こす `paa broker` の log にしか出ず、`KeepAlive` が 10 秒毎に再起動し続ける
+ * (PBI-0048 レビュー AC-X2)
  */
 function resolveBrokerBin(): string | null {
   if (process.env.PAA_BROKER_BIN) {
@@ -200,12 +203,34 @@ function resolveBrokerBin(): string | null {
   if (existsSync(release)) return release;
   const debug = join(REPO_ROOT, "broker", "target", "debug", "paa-broker");
   if (existsSync(debug)) return debug;
+  const downloaded = join(binDir(), "paa-broker");
+  if (existsSync(downloaded)) return downloaded;
   return Bun.which("paa-broker");
 }
 
 const BROKER_BUILD_HINT =
   "broker binary が見つかりません。'cargo build --release --manifest-path broker/Cargo.toml' を実行してください\n" +
   "  (credential は保存済みです。build 後は 'bun run paa broker' で起動できます)";
+
+/**
+ * repo checkout も cargo も無い配布先(README の Quickstart)向け: broker binary がどこにも
+ * 無ければ公開 Release から取得を試みる(PBI-0154)。取れなくても黙って cargo 案内(呼び出し側の
+ * `BROKER_BUILD_HINT`)に倒す —— network が無いだけで `paa login` を失敗させない。
+ * checksum 不一致だけは特別扱いする: 「build し直せ」という cargo 案内は誤りなので、
+ * ここで壊れている旨を出して止める
+ */
+async function ensureBrokerBinary(): Promise<void> {
+  const found = resolveBrokerBin();
+  // 手元 build / PATH / `PAA_BROKER_BIN` が在るならそれを使う(取りに行かない)。**取得先に置いた物
+  // だけは毎回 ensureBinary に通す** —— ここで「在るから何もしない」にすると、paa を新しくしても
+  // broker だけ初回に取った版のまま固定される(版が同じなら stamp を見て present で即返るので、
+  // 通しても download は起きない)
+  if (found && found !== join(binDir(), "paa-broker")) return;
+  const outcome = await ensureBinary("paa-broker");
+  if (outcome.status === "checksum_mismatch") {
+    fail(`NG 取得物が壊れています: ${outcome.detail}`);
+  }
+}
 
 /**
  * broker(Rust)へ渡す env。`PAA_CLI` は dev repo で `paa` が PATH に無いため必須(broker/src/adopt.rs)。
@@ -542,6 +567,7 @@ switch (command) {
       }).catch(() => null);
       handle = who?.status === 200 ? who.body.handle : undefined;
     }
+    await ensureBrokerBinary();
     if (args.includes("--foreground")) {
       process.exit(await runBrokerForeground(credential));
     }
