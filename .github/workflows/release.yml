@@ -2,7 +2,7 @@
 #
 # `atn install` / `atn login` と plugin の launcher はここで公開された asset を取りに来る
 # (`https://github.com/<owner>/<repo>/releases/download/v<version>/atn-mcp-<target>`)。
-# **公開 repo(personal-agent-account/paa)側で走った Release だけが token 無しで取れる** ——
+# **公開 repo(personal-agent-account/all-together-now)側で走った Release だけが token 無しで取れる** ——
 # 正本 repo(private)で走らせた場合、asset は private になり取得側は 404 になる。
 # action の版は 2026-09-01 に GitHub API で実測した最新 major:
 #   actions/checkout v7.0.1 / oven-sh/setup-bun v2.2.0 / softprops/action-gh-release v3.0.3 /

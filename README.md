@@ -26,7 +26,7 @@ the AI apps don't do:
 
 Works from any OS (macOS / Linux / Windows / iPhone / Android) because the address is mail
 and webhooks, not an OS notification hook. Watch the whole loop live at the hosted demo:
-**[https://paa.shibubu.ai](https://paa.shibubu.ai)** — signup is open and everything is $0
+**[https://atn.shibubu.ai](https://atn.shibubu.ai)** — signup is open and everything is $0
 during the alpha.
 
 > All Together Now provides one persistent Agent Identity — Profile, Address,
@@ -36,8 +36,8 @@ during the alpha.
 
 ## How it works — three steps
 
-1. **Get an address.** Sign up at [paa.shibubu.ai](https://paa.shibubu.ai) and you have
-   `@you` and `you@paa.shibubu.ai`. Send yourself a mail from your phone: it lands in the
+1. **Get an address.** Sign up at [atn.shibubu.ai](https://atn.shibubu.ai) and you have
+   `@you` and `you@atn.shibubu.ai`. Send yourself a mail from your phone: it lands in the
    timeline within a minute, sealed on arrival — the operator can't read it.
 2. **Attach a runtime — then a second one.** `atn login` connects a machine and starts the
    background broker; `atn pair claude` (or `codex` / `gemini`) attaches the runtime as `@you`.
@@ -55,7 +55,7 @@ Claims are cheap; this is what has tests or a live round-trip behind it:
   the same `@handle` via the adapters in this repo and read/write the same mailbox. The hero
   demo asserts identity equality across the switch in code, not prose (`adapters/official/claude`,
   `adapters/official/codex`; Gemini CLI and generic API-key providers ship in the same tree).
-- **Mail round-trip, sealed on arrival.** A mail sent to `you@paa.shibubu.ai` from an ordinary
+- **Mail round-trip, sealed on arrival.** A mail sent to `you@atn.shibubu.ai` from an ordinary
   mail app is sealed to your device keys the moment it arrives; the server keeps the sender,
   the time, and the source kind in the clear and nothing of the subject or body. The exact
   table is on the privacy page, not in a footnote.
@@ -76,35 +76,41 @@ Claims are cheap; this is what has tests or a live round-trip behind it:
 
 No JavaScript runtime, no Rust toolchain, no repo clone required — the CLI and the background
 broker it installs are both prebuilt binaries from this repo's
-[Releases](https://github.com/personal-agent-account/paa/releases). Everything `atn` fetches
+[Releases](https://github.com/personal-agent-account/all-together-now/releases). Everything `atn` fetches
 afterwards (the broker, the MCP server) is checked against the Release's `SHA256SUMS` before it
 is placed or run:
 
 ```bash
-# macOS (Apple Silicon) → darwin-arm64 · macOS (Intel) → darwin-x64 · Linux (x64) → linux-x64
 TARGET="$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/')"
-curl -fsSL "https://github.com/personal-agent-account/paa/releases/latest/download/atn-$TARGET" -o atn
+curl -fsSL "https://github.com/personal-agent-account/all-together-now/releases/latest/download/atn-$TARGET" -o atn
 chmod +x atn
-
-# connect this machine to your account (fetches the broker binary, verifies its checksum, starts it;
-# on macOS it registers a launchd agent so it survives reboots)
 ./atn login --url https://paa-cloud.onrender.com
-./atn pair claude      # attach Claude Code (same flow for codex / gemini)
-./atn status           # who's attached, what's unread — never the message bodies
+./atn pair claude
+./atn status
 ```
+
+`TARGET` resolves to `darwin-arm64` (Apple Silicon), `darwin-x64` (Intel Mac), or `linux-x64`.
+`login` connects this machine: it fetches the broker binary, checks it against the Release's
+`SHA256SUMS`, starts it, and on macOS registers a launchd agent so it survives reboots.
+`pair` attaches a runtime — the same line works for `codex` and `gemini` — and `status` prints
+who is attached and how much is unread, never the message bodies.
+
+Every block here is deliberately comment-free: `zsh` does not treat `#` as a comment in an
+interactive shell, so a pasted `# …` line fails with `parse error`.
 
 Already inside Claude Code or Codex? Install the adapter as a runtime plugin instead —
 pairing (`atn login` / `atn pair` above) is still required afterward:
 
 ```bash
-# Claude Code:
-claude plugin marketplace add personal-agent-account/paa
-# Codex:
-codex plugin marketplace add personal-agent-account/paa
+claude plugin marketplace add personal-agent-account/all-together-now
+```
+
+```bash
+codex plugin marketplace add personal-agent-account/all-together-now
 ```
 
 **Windows / iPhone / Android:** the inbox, the sources, and the "handle this" loop work from
-the PWA at [paa.shibubu.ai](https://paa.shibubu.ai) on any OS. What needs macOS or Linux today
+the PWA at [atn.shibubu.ai](https://atn.shibubu.ai) on any OS. What needs macOS or Linux today
 is the machine you *attach a runtime on* — the `atn` CLI and the broker aren't built for
 Windows yet. Android additionally gets an optional notification collector
 (`apps/android-collector`, build from source). iOS has no public API for that, which is why
@@ -112,12 +118,12 @@ nothing here promises it.
 
 ### Getting an account
 
-Signup is open — create an account at **[https://paa.shibubu.ai](https://paa.shibubu.ai)**,
+Signup is open — create an account at **[https://atn.shibubu.ai](https://atn.shibubu.ai)**,
 then run `atn login --url https://paa-cloud.onrender.com` as above (`--url` points at whichever
 All Together Now server issued your account).
 
 What the operator can and cannot read is written down, not implied:
-**[https://paa.shibubu.ai/privacy](https://paa.shibubu.ai/privacy)**. The short version: for a
+**[https://atn.shibubu.ai/privacy](https://atn.shibubu.ai/privacy)**. The short version: for a
 sealed item the server holds the source kind, the app, the sender, the arrival time, and
 whether you've dealt with it — never the subject or body. The key that unlocks your messages
 lives in your browser / device and is never sent anywhere.
@@ -126,7 +132,7 @@ lives in your browser / device and is never sent anywhere.
 
 | Source | How | Arrives |
 |---|---|---|
-| Mail | Anyone mails `you@paa.shibubu.ai`; or forward the notification mail Slack / X / your bank already send you | Sealed on arrival |
+| Mail | Anyone mails `you@atn.shibubu.ai`; or forward the notification mail Slack / X / your bank already send you | Sealed on arrival |
 | GitHub | Repo → Settings → Webhooks → Payload URL and Secret from *Settings › Sources* (JSON, HMAC-SHA256) | Issues opened, PR opened / review requested, reviews submitted, failed checks, releases |
 | Any script / Zapier / IFTTT | `curl -X POST …/v1/inbound/notification -H "Authorization: Bearer <source token>" -d '{"app_id":"my.app","title":"Hello"}'` | Sealed on arrival |
 | Android | `apps/android-collector` — per-app capture (off / title only / full text), encrypted on the device, queued while offline | Sealed on the device |
@@ -209,7 +215,7 @@ Network implementation is kept private:
 
 Using the code in this repo (adapters, CLI, MCP server, broker) requires an All Together Now account server
 to talk to — during Stage 1A that's the hosted instance at
-**[https://paa.shibubu.ai](https://paa.shibubu.ai)**, open to signup.
+**[https://atn.shibubu.ai](https://atn.shibubu.ai)**, open to signup.
 
 ## Why this split
 

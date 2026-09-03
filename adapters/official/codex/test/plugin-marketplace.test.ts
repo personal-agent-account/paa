@@ -95,8 +95,8 @@ describe("公開 repo README の quickstart 順序 (PBI-0096 review)", () => {
       // 「何も持っていない人の道が先・既に runtime の中に居る人の道が後」で変わらないので、
       // 基準を clone から binary quickstart に移す(clone 節は今の README には無い)。
       const binaryLine = lines.findIndex((l) => l.includes("releases/latest/download/atn-"));
-      const claudeLine = indexOfLine("claude plugin marketplace add personal-agent-account/paa");
-      const codexLine = indexOfLine("codex plugin marketplace add personal-agent-account/paa");
+      const claudeLine = indexOfLine("claude plugin marketplace add personal-agent-account/all-together-now");
+      const codexLine = indexOfLine("codex plugin marketplace add personal-agent-account/all-together-now");
       expect(binaryLine).toBeGreaterThanOrEqual(0);
       expect(claudeLine).toBeGreaterThan(binaryLine);
       expect(codexLine).toBeGreaterThan(claudeLine);
@@ -105,8 +105,8 @@ describe("公開 repo README の quickstart 順序 (PBI-0096 review)", () => {
       if (cloneLine >= 0) expect(cloneLine).toBeGreaterThan(codexLine);
       // 重複行の混入を刺す(AC-X1 の「README 側に重複行は増えない」の機械固定)
       const countOf = (needle: string) => lines.filter((l) => l.trim() === needle).length;
-      expect(countOf("claude plugin marketplace add personal-agent-account/paa")).toBe(1);
-      expect(countOf("codex plugin marketplace add personal-agent-account/paa")).toBe(1);
+      expect(countOf("claude plugin marketplace add personal-agent-account/all-together-now")).toBe(1);
+      expect(countOf("codex plugin marketplace add personal-agent-account/all-together-now")).toBe(1);
     },
   );
 });

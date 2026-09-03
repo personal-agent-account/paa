@@ -17,7 +17,7 @@ export const PAA_BINARY_VERSION = "0.2.0";
 
 /** 公開 Release の置き場。private な mirror へ向けたい時は `PAA_BINARY_BASE_URL` で差し替える */
 export const DEFAULT_BINARY_BASE_URL =
-  "https://github.com/personal-agent-account/paa/releases/download";
+  "https://github.com/personal-agent-account/all-together-now/releases/download";
 
 type Env = Record<string, string | undefined>;
 
