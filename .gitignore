@@ -11,3 +11,8 @@ broker/target/
 
 .paa/
 credentials.json
+
+# a `paa` binary downloaded by the Quickstart into the repo root (never commit a 70MB binary)
+/paa
+/paa-darwin-*
+/paa-linux-*
