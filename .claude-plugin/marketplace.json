@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Official runtime adapters for All Together Now (a personal agent account)",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {

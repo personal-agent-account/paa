@@ -3,7 +3,7 @@
 # 「置いてあれば使う」側は launcher(packages/mcp/atn-mcp)と resolveMcpServerCommand が持つ。
 #
 #   ./scripts/build-binaries.sh                    配布 target 全部(darwin-arm64 / darwin-x64 / linux-x64)
-#   ./scripts/build-binaries.sh --host-only        今の機械向けだけ → dist/atn-mcp, dist/paa
+#   ./scripts/build-binaries.sh --host-only        今の機械向けだけ → dist/atn-mcp, dist/atn
 #   ./scripts/build-binaries.sh --host-only atn-mcp  1 本だけ
 #   ./scripts/build-binaries.sh --out /tmp/x       出力先を変える
 #
@@ -26,13 +26,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ -n "$names" ] || names="atn-mcp paa"
+[ -n "$names" ] || names="atn-mcp atn"
 
 entry_for() {
   case "$1" in
     atn-mcp) echo "packages/mcp/src/server.ts" ;;
-    paa) echo "apps/cli/src/paa.ts" ;;
-    *) echo "unknown binary: $1 (atn-mcp | paa)" >&2; exit 2 ;;
+    atn) echo "apps/cli/src/paa.ts" ;;
+    *) echo "unknown binary: $1 (atn-mcp | atn)" >&2; exit 2 ;;
   esac
 }
 

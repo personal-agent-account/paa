@@ -176,7 +176,7 @@ describe("plugin launcher の分岐 (PBI-0132)", () => {
 });
 
 describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
-  test("--host-only で dist/atn-mcp と dist/paa ができ、どちらも実行可能", async () => {
+  test("--host-only で dist/atn-mcp と dist/atn ができ、どちらも実行可能", async () => {
     const out = await mkdtemp(join(tmpdir(), "paa-dist-"));
     const proc = Bun.spawn([BUILD, "--host-only", "--out", out], {
       cwd: repoRoot,
@@ -186,7 +186,7 @@ describe("scripts/build-binaries.sh (PBI-0132 AC-9)", () => {
     const stderr = await new Response(proc.stderr).text();
     expect({ code: await proc.exited, stderr }).toMatchObject({ code: 0 });
 
-    for (const name of ["atn-mcp", "paa"]) {
+    for (const name of ["atn-mcp", "atn"]) {
       const info = await stat(join(out, name));
       expect(info.isFile()).toBe(true);
       expect(info.mode & 0o111).toBeGreaterThan(0);
