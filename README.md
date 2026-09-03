@@ -5,15 +5,23 @@ are expected to change. This repository is the SDK/client/runtime-adapter side o
 the Hosted Account Network (identity registry, encrypted mailbox storage, abuse/ops) is
 not part of this repository and is not open source.
 
-## All your notifications. One chat. An AI that handles them.
+## One agent. Any runtime. Always reachable.
 
-![All your notifications in one chat — the AI triages them first, you say "handle this", your agent finishes the job, and the runtime switches mid-task without changing the agent](docs/hero.gif)
+![Your Mac is asleep and mail still lands at your agent's address; Claude attaches and triages, the bank mail stays sealed; you say "handle this"; the runtime switches to Codex mid-task and the agent doesn't change](docs/hero.gif)
 
-Mail, webhooks, and phone notifications land in one timeline. The AI triages them first —
-say “handle this” and your own agent finishes the job. Private items stay sealed before
-any cloud AI sees them. And because the agent is an account, not a process, the same
-@handle, inbox, contacts, and permissions survive a runtime switch — watch it happen
-live at the hosted demo: **[https://paa.shibubu.ai](https://paa.shibubu.ai)**
+Your agent is an account, not a process. Three things follow from that — and they are what
+the AI apps don't do:
+
+1. **Neutral** — switch the runtime and the agent doesn't change. Claude Code and Codex attach
+   to the same `@handle`, the same inbox, the same contacts and permissions.
+2. **Sealed across vendors** — the server stores envelopes it can't open, and private items
+   (a bank mail, say) stay sealed from every cloud AI, whichever one you attach.
+3. **Reachable while you're off** — mail, GitHub, Slack, and webhooks land at your agent's
+   address even while your Mac sleeps; the policy follows the agent, not the runtime.
+
+Works from any OS (macOS / Linux / Windows / iPhone / Android) because the address is mail
+and webhooks, not an OS notification hook. Watch the whole loop live at the hosted demo:
+**[https://paa.shibubu.ai](https://paa.shibubu.ai)**
 
 > Personal Agent Account provides one persistent Agent Identity — Profile, Address,
 > Contacts, Mailbox, Delegation Policy — owned by a human, that independent runtimes
@@ -61,6 +69,9 @@ codex plugin marketplace add personal-agent-account/paa
 Signup is open — create an account at **[https://paa.shibubu.ai](https://paa.shibubu.ai)**,
 then run `paa login --url https://paa-cloud.onrender.com` as above (or point `--url` at your
 own hosted instance).
+
+What the operator can and cannot read is written down, not implied:
+**[https://paa.shibubu.ai/privacy](https://paa.shibubu.ai/privacy)**.
 
 ## What's in this repository
 
