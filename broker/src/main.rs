@@ -333,8 +333,13 @@ async fn run_once(
                 if parsed.get("type").and_then(Value::as_str) == Some("registered") {
                     let adoptions = adopt::parse_registered(&parsed);
                     eprintln!("broker: received registered count={}", adoptions.len());
-                    for a in &adoptions {
-                        let (ok, detail) = adopt::adopt(a).await;
+                    // **並行に走らせる**(PBI-0190) —— 直列だと `runtime 数 × ADOPT_TIMEOUT` の間
+                    // WS ループが止まる。1 件ずつ `atn adopt` を起こすのは変えず、待ちだけ重ねる
+                    let results = futures_util::future::join_all(
+                        adoptions.iter().map(|a| async move { adopt::adopt(a).await }),
+                    )
+                    .await;
+                    for (a, (ok, detail)) in adoptions.iter().zip(results) {
                         eprintln!(
                             "broker: adopt kind={} runtime_id={} ok={ok} detail={detail}",
                             a.kind, a.runtime_id

@@ -418,7 +418,13 @@ function escapeXml(s: string): string {
 function plistXml(): string {
   const args = [process.execPath, fileURLToPath(import.meta.url), "broker"];
   const argXml = args.map((a) => `      <string>${escapeXml(a)}</string>`).join("\n");
-  const passthroughKeys = ["PAA_HOME", "PAA_BROKER_HOME", "PAA_BROKER_BIN", "PAA_URL"] as const;
+  // **PATH も渡す**(PBI-0190) —— launchd の既定 PATH は `/usr/bin:/bin:/usr/sbin:/sbin` しか無く、
+  // adopt が呼ぶ **runtime 側の CLI** が解決できない(2026-09-04 実測:
+  // `codex mcp add failed: env: node: No such file or directory`)。argv0 に execPath を使って
+  // bun だけ解決していたが、その先で呼ばれる CLI の PATH は誰も面倒を見ていなかった。
+  // login を打った shell の PATH をそのまま焼く —— その shell で runtime CLI が動いていたのだから、
+  // 同じ PATH なら adopt も動く
+  const passthroughKeys = ["PAA_HOME", "PAA_BROKER_HOME", "PAA_BROKER_BIN", "PAA_URL", "PATH"] as const;
   const envEntries = passthroughKeys
     .filter((k) => process.env[k])
     .map((k) => `    <key>${k}</key>\n    <string>${escapeXml(process.env[k]!)}</string>`)

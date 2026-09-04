@@ -27,7 +27,14 @@ pub struct Adoption {
 }
 
 /// materialize 1 件の上限。CLI が対話待ちで固まっても WS ループを巻き込まない。
-const ADOPT_TIMEOUT: Duration = Duration::from_secs(5);
+///
+/// **5 秒では足りない**(PBI-0190 で本番実測): `atn adopt` は bun を起動し、その先で
+/// `claude mcp add` のような **runtime 自身の CLI** を呼ぶ。その CLI の起動が数秒かかる機械では
+/// 5 秒を超え、全部 `adopt_timeout` で落ちて **MCP が 1 つも登録されない**
+/// (同じ機械で `claude --version` の probe も 5 秒で timeout していた)。
+/// 60 秒に伸ばし(30 秒でも gemini が落ちた)、代わりに呼び出し側で **並行**に走らせて
+/// WS ループの停止時間を 1 件分に抑える。
+const ADOPT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// `registered` payload から取り出す。欠落・型不正の要素は捨てる(1 つ壊れていても残りは進める)。
 /// `name` だけは空でも通す —— 表示名が無いことは materialize の失敗理由にならない。
