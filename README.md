@@ -84,7 +84,7 @@ is placed or run:
 TARGET="$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/')"
 curl -fsSL "https://github.com/personal-agent-account/all-together-now/releases/latest/download/atn-$TARGET" -o atn
 chmod +x atn
-./atn login --url https://paa-cloud.onrender.com
+./atn login --url https://atn.shibubu.ai
 ./atn pair claude
 ./atn status
 ```
@@ -119,7 +119,7 @@ nothing here promises it.
 ### Getting an account
 
 Signup is open — create an account at **[https://atn.shibubu.ai](https://atn.shibubu.ai)**,
-then run `atn login --url https://paa-cloud.onrender.com` as above (`--url` points at whichever
+then run `atn login --url https://atn.shibubu.ai` as above (`--url` points at whichever
 All Together Now server issued your account).
 
 What the operator can and cannot read is written down, not implied:
