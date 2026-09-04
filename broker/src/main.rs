@@ -5,7 +5,6 @@ mod paa_cli;
 mod registry;
 mod triggers;
 
-use std::cmp::min;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -103,7 +102,11 @@ async fn main() {
 
     let mut backoff = INITIAL_BACKOFF;
     loop {
-        let wait = match run_once(
+        // 接続が「どれだけ続いたか」を測る(PBI-0190 review)。clean close でも **すぐ切れた**なら
+        // 障害として数える —— そうしないと handshake 直後に切る相手に 500ms 間隔で張り付き、
+        // 1 周ごとの registry fetch と discovery scan で CPU と Cloud を焼く
+        let started = Instant::now();
+        let outcome = run_once(
             &ws_url,
             &token,
             &mut state,
@@ -111,23 +114,24 @@ async fn main() {
             &mut results_rx,
             &mut trigger_rx,
         )
-        .await
-        {
+        .await;
+        let lasted = started.elapsed();
+        let clean = match &outcome {
             Ok(()) => {
                 eprintln!("broker: connection closed");
-                // clean close は障害ではないので即座に初期値へ戻す(直後の doubling に
-                // 巻き込まれてリセットが 1 段ずれないよう、doubling は Err 側でだけ行う)。
-                backoff = INITIAL_BACKOFF;
-                backoff
+                true
             }
             Err(e) => {
                 eprintln!("broker: connection error: {e}");
-                let wait = backoff;
-                backoff = min(backoff * 2, MAX_BACKOFF);
-                wait
+                false
             }
         };
-        eprintln!("broker: reconnecting in {wait:?}");
+        // clean close の即時リセットは「実際に繋がっていた接続」だけに効かせる(triggers.rs)。
+        // 短命な接続は Err と同じく倍化する —— 判定は純関数 1 つに集約して test で固定する
+        let (wait, next) =
+            triggers::reconnect_wait(backoff, clean, lasted, INITIAL_BACKOFF, MAX_BACKOFF);
+        backoff = next;
+        eprintln!("broker: connection lasted {lasted:?}; reconnecting in {wait:?}");
         tokio::time::sleep(wait).await;
     }
 }

@@ -150,6 +150,34 @@ pub enum TickAction {
     Rescan,
 }
 
+/// 「繋がっていた」と認めるまでの最短時間(PBI-0190 review)。これより短い接続は、clean close でも
+/// **障害として数える** —— 下の `reconnect_wait` を参照。
+pub const MIN_HEALTHY_CONNECTION: Duration = Duration::from_secs(30);
+
+/// 再接続までの待ち時間と、次に使う backoff を決める(純関数)。
+///
+/// **clean close を無条件で「障害ではない」と読むと、handshake 直後に切る相手に張り付く**
+/// (PBI-0190 review で発見)。1 接続ごとに registry fetch(HTTPS)+ discovery scan を走らせるので、
+/// 500ms 間隔で回り続けると端末の CPU と Cloud の両方を焼く。しかも log には
+/// `connected` → `connection closed` が並ぶだけで、**繋がっているように見える**。
+/// deploy 中の proxy が 101 を返してすぐ切る・server が crash loop に居る、で普通に起きる。
+///
+/// 判定は 1 つだけ: **その接続が `MIN_HEALTHY_CONNECTION` 続いたか**。
+///  - 続いた後の clean close = 正常な切断 → 即座に `initial` へ戻し、そのまま待つ(従来どおり)
+///  - それより短い / `Err` = 障害 → 今の backoff だけ待ち、次を倍化(上限 `max`)
+pub fn reconnect_wait(
+    current: Duration,
+    clean: bool,
+    lasted: Duration,
+    initial: Duration,
+    max: Duration,
+) -> (Duration, Duration) {
+    if clean && lasted >= MIN_HEALTHY_CONNECTION {
+        return (initial, initial);
+    }
+    (current, std::cmp::min(current * 2, max))
+}
+
 /// heartbeat tick の判定(純関数)。
 ///
 /// **wake を idle より先に見る**のが要点: `last_activity` も単調時計なので、長時間 sleep した後の
